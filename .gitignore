@@ -1,0 +1,38 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Env files
+.env
+*.env
+backend/.env
+frontend/.env
+
+# Build output
+build/
+dist/
+
+# Logs
+logs/
+*.log
+
+# OS / editor
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Hardhat
+artifacts/
+cache/
+
+# Coverage
+coverage/
+
+# Mongo local files
+data/
