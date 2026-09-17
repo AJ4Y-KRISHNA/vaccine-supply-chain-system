@@ -12,7 +12,7 @@ Date: 2026-09-17. This tracks the ten recommendations in section 13 of the proje
 | 6. Secure local blockchain integration | Implemented; integrated acceptance follows | Writer allowlist, distinct release addresses, no mock receipts, loopback/31337 guard, durable audit-hash discovery/retry and live verification. Four real Hardhat tests plus three backend anchoring tests pass. See LOCAL_BLOCKCHAIN.md for limitations. |
 | 7. Validate forecasting | Reproducible prototype evaluation implemented | Deterministic baselines, chronological selection/holdout metrics, explicit provenance, CSV restrictions and corrected experimental CNN window. Five Python tests and API smoke pass. Real-demand validation remains a research prerequisite, not a completed claim. |
 | 8. Constrained supply allocation | Advisory prototype implemented | Priority/FEFO multi-destination preview, expiry-at-arrival, stock/hold/release checks and shared transport/hospital capacity. Admin UI and persisted explanations. Explicit existing single-batch approval remains execution boundary; no global-optimum or automatic split-order claim. |
-| 9. Full acceptance scenario | Pending | Previous cold-chain-only synthetic demo remains available. No claim of a full live-chain/AI end-to-end run. |
+| 9. Full acceptance scenario | Passed in isolated local services | 33 actual HTTP calls: manufacture → two-address release → Python forecast → constrained plan → allocation → excursion/hold → reviewed clearance → delivery → eight live audit hash verifications. No chain/AI mocks. See SYSTEM_ACCEPTANCE.md. |
 | 10. Research evaluation | Pending | Full-system metrics and research results cannot be asserted before the preceding work. |
 
 ## Step 2: implemented behavior
