@@ -7,8 +7,8 @@ Date: 2026-09-17. This tracks the ten recommendations in section 13 of the proje
 | 1. Checkpoint the prototype | Complete | Local branch `codex/ordered-roadmap-20260917`; checkpoint `2425396`. Existing cold-chain work retained. Environment files, dependency folders and generated artifacts excluded. Not pushed. |
 | 2. Repair batch–shipment–order relationships | Complete for user-confirmed demo data | 62 journaled operations; 13 synthetic placeholder batches; all seven integrity checks now zero; retry plans zero changes. Original values retained, no deletions or quality approvals. |
 | 3. Harden authentication and authorization | Local prototype hardening implemented | Password migration, required random secrets, no bypass/role-only login, DB-backed JWT identity, role and organization checks, scoped legacy reads, login throttling, body limits and local-only listener. 91 backend + 20 frontend tests passed at this checkpoint. Not a production security certification. |
-| 4. Simulator UI and durable operation | Pending | Existing simulator remains in-memory. |
-| 5. Operational monitoring | Pending | Autonomous missing-telemetry checks and pushed/periodic dashboard updates remain to be implemented. |
+| 4. Simulator UI and durable operation | Complete for single-process prototype | Admin/manufacturer controls, scoped selectors, exact durable RNG/clock/pending-reading checkpoints, stopped restart recovery and runtime authorization. |
+| 5. Operational monitoring | Complete for opt-in simulated clocks | Five-second silence watchdog, explicit expected-first-reading baseline, persisted clock anchors and five-second dashboard refresh. In-app notifications only; no real hardware-health claim. |
 | 6. Secure local blockchain integration | Pending | Contract/oracle access-control fixes, contract tests and cold-chain hash anchoring remain. |
 | 7. Validate forecasting | Pending | Forecast window, dataset provenance, reproducibility, baseline comparisons and backtests remain. |
 | 8. Constrained supply allocation | Pending | Step 2 supplies basic single-batch allocation accounting, not an optimizer. Expiry, capacity, multi-destination allocation and validated demand inputs remain. |
@@ -54,6 +54,10 @@ The fresh audit reports zero orphan shipments, unknown batch owners, orphan/conf
 
 This is single-process prototype allocation, not a distributed transaction or production inventory ledger. Other legacy shipment-creation paths still need coordinated quantity enforcement in the later inventory/security work. A crash after a blockchain write but before the shipment save can still repeat the chain write on retry; resolving that requires the later durable outbox/idempotent-chain design. No stock returns, order amendments, split allocations or clinical eligibility judgments are invented here.
 
-## Verification
+## Step 4–5 verification
+
+101 backend tests across 13 suites and 22 frontend tests across 7 suites passed (123 total). New checks cover snapshot reproducibility, restart recovery, checkpoint/ingestion failure, retry without advancing a second tick, duplicate/overlapping controls, revoked operator access, explicit monitor clocks, missing-first-reading detection, normal scheduled interval timing and monitor errors. Pending raw telemetry retries are not an exactly-once guarantee. Generator reset never erases safety history. Monitoring is opt-in and remains armed through stop/restart until deliberately paused.
+
+## Earlier step 2 verification
 
 Fresh verification: **68 backend tests across 9 suites and 18 frontend tests across 5 suites passed (86 total)**. The **frontend production build compiled successfully**. Non-blocking Node deprecation and outdated Browserslist-data warnings remain. Automated tests cover allocation links, authorization, missing inputs, product/owner/release/hold checks, stock shortage, concurrent/repeated requests, partial-save recovery, notification retries, chain failure/mock handling, legacy conflicts, read-only audit behavior and the allocation form. New backend suites use isolated generated test databases and mocked blockchain calls. The legacy dashboard smoke suite used a separate read-only test database. The allocation suite also passed again after adding an exact-capacity recovery check.

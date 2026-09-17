@@ -7,6 +7,7 @@ module.exports = mongoose.model("TelemetryState", new mongoose.Schema({
   vehicleId: String,
   policyId: mongoose.Schema.Types.ObjectId,
   lastReadingAt: Date,
+  expectedSince: Date,
   checkedAt: Date,
   temperature: Number,
   humidity: Number,

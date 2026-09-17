@@ -41,7 +41,7 @@ No historical telemetry or legacy `Batch.temperaturePolicy` values are deleted o
 - Stale, conflicting or duplicate timestamps cannot roll state backward or clear a hold. Resetting the generator never clears database safety state.
 - Confidence is `HIGH` or `LIMITED` evidence completeness, explicitly **not** a calibrated probability, an ML score, or a vaccine safety judgment.
 - For a synthetic policy of 2–8°C and 18 minutes, continuous 10.8°C readings reproduce: “Critical: 10.8°C is 2.8°C above the approved maximum of 8°C for 18 consecutive measured minutes.” These numbers are test examples, not medical guidance.
-- Accepted readings check other known streams at the same timestamp. To test complete silence, explicitly submit the advancing simulation clock to `/telemetry/check`. If no stream has ever reported, there is no last-reading baseline to evaluate. Pausing the entire simulation does not automatically advance time.
+- Accepted readings check other known streams at the same timestamp. Complete silence can be checked manually with `/telemetry/check` or with the opt-in simulator monitor. An armed monitor records an explicit expected-first-reading baseline (not a fabricated measurement), advances its anchored simulation clock with wall time, and checks every five seconds. Stop/reset does not disarm it. Historical late readings cannot roll the evidence clock backward. See the simulator guide for recovery and pause behavior.
 
 ## Authorization and operational enforcement
 

@@ -29,7 +29,7 @@ The existing `POST /api/temperature/ingest` request still accepts the original m
 
 Pass the same `seed`, `startTime`, tick interval, route, temperature range, and scenario to receive the same sequence of readings. The simulation clock starts at `startTime`; the first tick is timestamped with that value, and each later tick advances exactly `tickIntervalMs`. The default clock start is `2026-01-01T00:00:00.000Z`, rather than the host clock, so default simulations are repeatable too.
 
-`reset` stops the scheduler, restores the configured clock start and battery level, reinitializes the seeded generator, and removes the last runtime reading. It never deletes persisted logs, alerts, telemetry checkpoints, or quarantine holds. Replayed historical readings are stored but skipped by the alert engine as stale/duplicate. Use a separate demo batch/device for independent replays. Runtime simulation state is intentionally in memory; restarting the backend stops active devices and requires creating/starting them again.
+`reset` stops the scheduler, restores the configured clock start and battery level, reinitializes the seeded generator, and removes the last runtime reading. It never deletes persisted logs, alerts, telemetry checkpoints, or quarantine holds. Replayed historical readings are stored but skipped by the alert engine as stale/duplicate. Use a separate demo batch/device for independent replays. `durableSimulator.js` saves configuration, exact RNG/clock/battery state and pending readings in `SimulatorDevice`. After restart devices are restored **stopped** and require explicit start, not recreation. Current operator access is checked before each scheduled write.
 
 Overlapping ticks/resets are rejected while persistence is in flight. Scheduled ticks skip a busy device. A persistence error stops its timer, exposes `lastError` and `pendingRetry` in status, and retains the exact reading for an explicit retry. Raw ingestion is append-only and not exactly-once: a partially successful write can leave duplicate raw logs on retry; alert state and notifications are deduplicated. `stop` prevents future timer ticks but does not cancel a write already in flight.
 
@@ -59,6 +59,8 @@ All `/api/simulator/*` endpoints require a signed JWT and a current database acc
 | `POST /api/simulator/:deviceId/scenario` | Stop and switch `{ "scenario": "NORMAL" }` (or another supported scenario), preserving device identity, RNG position, battery and clock. Use this to demonstrate recovery after a high/low scenario. |
 | `GET /api/simulator/:deviceId/status` | Inspect one device's configuration and runtime state. |
 | `GET /api/simulator/status` | Inspect all virtual device states in this backend process. |
+| `GET /api/simulator/inputs` | Scoped batch/shipment options and supported scenarios. |
+| `POST /api/simulator/:deviceId/monitor` | Arm/pause `{ "enabled": true }` silence monitoring; optional explicit `asOf` clock anchor. |
 
 Example create request:
 
@@ -91,7 +93,7 @@ cd backend
 npm start
 ```
 
-Use the frontend API client helpers in `frontend/src/services/simulator.js`, or call the endpoints directly. A manual tick creates one `TemperatureLog` record when MongoDB is available.
+Admin and Manufacturer dashboards include device creation, scenario selection, start/stop/tick/reset, persistence errors and monitor controls. Status refreshes every five seconds. The frontend API client helpers are in `frontend/src/services/simulator.js`. A manual tick creates one `TemperatureLog` record when MongoDB is available.
 
 Run the backend tests with:
 
@@ -100,11 +102,10 @@ cd backend
 npm test
 ```
 
-The simulator-focused tests cover deterministic seeded readings, clock movement, every scenario, device lifecycle controls, status, telemetry-to-`TemperatureLog` persistence mapping, and the legacy ingestion payload. Existing dashboard tests still require the configured MongoDB test database.
+Tests cover deterministic seeded readings, exact snapshot restoration, pending retry, all scenarios, lifecycle controls, authorization, telemetry mapping, legacy ingestion, and monitoring. Database suites create isolated random local test databases, never reseed the application database.
 
 ## Current limitations
 
-- Device configurations and active schedules are in-memory only; they do not survive a backend restart.
-- There is no device-management UI yet; the included frontend service exposes API wrappers for a future dashboard control.
+- Schedules are single-process and deliberately restore stopped; configuration and pending readings are durable. Do not run multiple backend workers against these devices.
 - The subsequent extension evaluates readings and creates application notifications, but adds no blockchain writes, hardware integrations or forecast changes.
-- Missing telemetry uses event/simulation time: every accepted reading checks other known streams for gaps. If all devices stop, explicitly advance the check clock using `/api/alerts/telemetry/check`; wall-clock time is not silently mixed with seeded simulation time.
+- Missing telemetry uses event/simulation time. For complete silence, use `/api/alerts/telemetry/check` or explicitly arm a device monitor. Armed monitors advance a separate anchored simulation clock using elapsed wall time and check every five seconds, including after restart. They detect a missing first expected reading without inventing a measured sample. Stop/reset does not pause monitoring or clear holds. Pause monitoring intentionally; recovery requires a fresh reading on the advanced clock. Historical seeds are never automatically interpreted as current wall time.

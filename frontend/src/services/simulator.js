@@ -1,5 +1,8 @@
 import API from "./api";
 
+export const fetchSimulatorInputs = async () => (await API.get("/simulator/inputs")).data;
+export const setSimulationMonitoring = async (deviceId, enabled, asOf) => (await API.post(`/simulator/${encodeURIComponent(deviceId)}/monitor`, { enabled, asOf })).data;
+
 export const createVirtualDevice = async (config) => {
   const response = await API.post("/simulator/devices", config);
   return response.data;

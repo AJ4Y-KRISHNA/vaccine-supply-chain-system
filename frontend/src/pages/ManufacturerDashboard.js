@@ -20,6 +20,7 @@ import { fetchManufacturerDashboard, signManufacturerBatchRelease } from "../ser
 import { useToast } from "../components/Toast";
 import BlockchainLog from "../components/BlockchainLog";
 import TemperatureAlertPanel from "../components/TemperatureAlertPanel";
+import SimulatorPanel from "../components/SimulatorPanel";
 
 ChartJS.register(
   CategoryScale,
@@ -537,6 +538,7 @@ function ManufacturerDashboard() {
             </div>
 
             <TemperatureAlertPanel role="manufacturer" />
+            <SimulatorPanel />
           </div>
         </main>
       </div>

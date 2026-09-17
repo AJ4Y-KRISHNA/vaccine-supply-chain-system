@@ -84,6 +84,10 @@ export default function TemperatureAlertPanel({ role }) {
   useEffect(() => {
     load();
   }, [load]);
+  useEffect(() => {
+    const timer = setInterval(() => { if (!pendingAction && !actionId && document.visibilityState !== "hidden") load(); }, 5000);
+    return () => clearInterval(timer);
+  }, [load, pendingAction, actionId]);
 
   const applyFilters = () => setAppliedFilters({ ...filters });
   const clearFilters = () => {

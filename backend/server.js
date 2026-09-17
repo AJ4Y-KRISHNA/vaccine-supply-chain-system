@@ -75,6 +75,7 @@ app.get("/", (req, res) => {
 const PORT = process.env.PORT || 5000;
 
 if (process.env.NODE_ENV !== "test") {
+  mongoose.connection.asPromise().then(() => require("./services/telemetryWatchdog").start()).catch(() => {});
   mongoose.connection.asPromise().then(() => app.listen(PORT, process.env.HOST || "127.0.0.1", () => {
     console.log(`🚀 Server running on port ${PORT}`);
   })).catch(() => { process.exitCode = 1; });

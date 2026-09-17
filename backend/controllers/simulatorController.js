@@ -4,11 +4,11 @@ const {
   DEFAULT_TICK_INTERVAL_MS,
   SCENARIOS,
   SimulationNotFoundError,
-  SimulatorManager,
 } = require("../services/iotSimulator");
 const { persistSimulationReading } = require("../services/telemetryService");
 
-const simulatorManager = new SimulatorManager();
+const { DurableSimulatorManager } = require("../services/durableSimulator");
+const simulatorManager = new DurableSimulatorManager();
 
 const routePointSchema = Joi.object({
   latitude: Joi.number().min(-90).max(90).required(),
@@ -40,30 +40,30 @@ function sendError(res, error) {
   return res.status(error.status || 500).json({ error: error.message || "Simulator operation failed" });
 }
 
-exports.createVirtualDevice = (req, res) => {
+exports.createVirtualDevice = async (req, res) => {
   const { error, value } = deviceSchema.validate(req.body, { abortEarly: false });
   if (error) return res.status(400).json({ error: error.details.map((detail) => detail.message) });
 
   try {
-    const simulation = simulatorManager.createDevice(value);
+    const simulation = await simulatorManager.createDevice(value, req.user.id);
     return res.status(201).json({ message: "Virtual device created", simulation });
   } catch (simulatorError) {
     return sendError(res, simulatorError);
   }
 };
 
-exports.startSimulation = (req, res) => {
+exports.startSimulation = async (req, res) => {
   try {
-    const simulation = simulatorManager.start(req.params.deviceId, persistSimulationReading);
+    const simulation = await simulatorManager.start(req.params.deviceId, persistSimulationReading, req.user.id);
     return res.json({ message: "Simulation started", simulation });
   } catch (error) {
     return sendError(res, error);
   }
 };
 
-exports.stopSimulation = (req, res) => {
+exports.stopSimulation = async (req, res) => {
   try {
-    const simulation = simulatorManager.stop(req.params.deviceId);
+    const simulation = await simulatorManager.stop(req.params.deviceId);
     if (!simulation) return res.status(404).json({ error: `Virtual device '${req.params.deviceId}' was not found` });
     return res.json({ message: "Simulation stopped", simulation });
   } catch (error) {
@@ -73,26 +73,26 @@ exports.stopSimulation = (req, res) => {
 
 exports.tickSimulation = async (req, res) => {
   try {
-    const result = await simulatorManager.tickOnce(req.params.deviceId, persistSimulationReading);
+    const result = await simulatorManager.tickOnce(req.params.deviceId, persistSimulationReading, req.user.id);
     return res.json({ message: "Simulation tick persisted", ...result });
   } catch (error) {
     return sendError(res, error);
   }
 };
 
-exports.resetSimulation = (req, res) => {
+exports.resetSimulation = async (req, res) => {
   try {
-    const simulation = simulatorManager.reset(req.params.deviceId);
+    const simulation = await simulatorManager.reset(req.params.deviceId);
     return res.json({ message: "Simulation reset and stopped", simulation });
   } catch (error) {
     return sendError(res, error);
   }
 };
 
-exports.changeScenario = (req, res) => {
+exports.changeScenario = async (req, res) => {
   const { error, value } = Joi.object({ scenario: Joi.string().uppercase().valid(...SCENARIOS).required() }).validate(req.body);
   if (error) return res.status(400).json({ error: error.message });
-  try { return res.json({ simulation: simulatorManager.setScenario(req.params.deviceId, value.scenario) }); }
+  try { return res.json({ simulation: await simulatorManager.setScenario(req.params.deviceId, value.scenario) }); }
   catch (simulatorError) { return sendError(res, simulatorError); }
 };
 
@@ -114,9 +114,24 @@ exports.getSimulatorStatus = async (req, res) => {
       const permitted = new Set(batches.filter(b => keys.includes(String(b.manufacturer || "").trim().toLowerCase())).map(b => b.batchId));
       simulations = simulations.filter(s => permitted.has(s.batchId));
     }
-    res.json({ simulations });
+    res.json({ simulations, monitor: require("../services/telemetryWatchdog").getHealth() });
   } catch (error) { sendError(res, error); }
 };
 
 exports.simulatorManager = simulatorManager;
 exports.deviceSchema = deviceSchema;
+exports.setMonitoring = async (req, res) => {
+  const { error, value } = Joi.object({ enabled: Joi.boolean().strict().required(), asOf: Joi.string().isoDate() }).validate(req.body);
+  if (error) return res.status(400).json({ error: error.message });
+  try { res.json({ simulation: await simulatorManager.setMonitoring(req.params.deviceId, value.enabled, value.asOf) }); }
+  catch (failure) { sendError(res, failure); }
+};
+exports.getInputs = async (req, res) => {
+  try {
+    const [batches, shipments] = await Promise.all([
+      require("../models/Batch").find(req.scope.batch).select("batchId vaccineType isDemo coldChainPolicyId").lean(),
+      require("../models/Shipment").find(req.scope.shipment).select("shipmentId batchId").lean(),
+    ]);
+    res.json({ batches, shipments, scenarios: SCENARIOS });
+  } catch (error) { sendError(res, error); }
+};

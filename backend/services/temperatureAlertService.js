@@ -145,20 +145,28 @@ async function evaluateReading(reading, temperatureLogId) {
   });
 }
 
-async function checkMissingTelemetry(batchId, asOf) {
+async function checkMissingTelemetry(batchId, asOf, expectedDevice = null) {
   return withBatchLock(batchId, async () => {
     const batch = await Batch.findOne({ batchId }).lean();
     if (!batch?.coldChainPolicyId) return [];
     const policy = await Policy.findById(batch.coldChainPolicyId).lean();
+    if (!policy || policy.batchId !== batchId || policy.vaccineType !== batch.vaccineType) return [];
     const timestamp = new Date(asOf);
     if (!Number.isFinite(timestamp.getTime())) throw new Error("Invalid simulation check time");
-    const states = await State.find({ batchId });
+    if (expectedDevice) {
+      const streamKey = buildExcursionKey({ batchId, ...expectedDevice });
+      await State.updateOne({ streamKey }, { $setOnInsert: { streamKey, batchId,
+        deviceId: expectedDevice.deviceId, shipmentId: expectedDevice.shipmentId || "", expectedSince: new Date(expectedDevice.expectedSince),
+        source: "software-iot-simulator", policyId: policy._id } }, { upsert: true });
+    }
+    const states = await State.find({ batchId, ...(expectedDevice ? { deviceId: expectedDevice.deviceId, shipmentId: expectedDevice.shipmentId || "" } : {}) });
     const alerts = [];
     for (const state of states) {
-      if (!state.lastReadingAt || timestamp <= state.checkedAt || timestamp - state.lastReadingAt <= policy.maximumReadingGapMs) continue;
+      const baseline = state.lastReadingAt || state.expectedSince;
+      if (!baseline || timestamp <= state.checkedAt || timestamp - baseline <= policy.maximumReadingGapMs) continue;
       const reading = { ...state.toObject(), timestamp, manufacturer: batch.manufacturer };
       const alert = await updateEvent({ reading, state, policy, category: "RELIABILITY", type: "TELEMETRY_RELIABILITY",
-        reasons: [`Sensor reading missing for ${timestamp - state.lastReadingAt}ms; approved gap is ${policy.maximumReadingGapMs}ms. Check device/simulation.`] });
+        reasons: [`${state.lastReadingAt ? "Sensor reading missing" : "First expected sensor reading missing"} for ${timestamp - baseline}ms; approved gap is ${policy.maximumReadingGapMs}ms. Check device/simulation.`] });
       state.checkedAt = timestamp;
       state.temperatureSince = undefined;
       await state.save();

@@ -44,13 +44,16 @@ function seedToInteger(seed) {
 function createSeededRandom(seed) {
   let state = seedToInteger(seed);
 
-  return () => {
-    state += 0x6d2b79f5;
+  const random = () => {
+    state = (state + 0x6d2b79f5) >>> 0;
     let value = state;
     value = Math.imul(value ^ (value >>> 15), value | 1);
     value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
     return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
   };
+  random.getState = () => state;
+  random.setState = value => { state = value >>> 0; };
+  return random;
 }
 
 function normaliseRoute(route) {
@@ -120,6 +123,24 @@ class VirtualDeviceSimulator {
     this.currentTimeMs = new Date(this.config.startTime).getTime();
     this.batteryLevel = this.config.initialBatteryLevel;
     this.lastReading = null;
+  }
+
+  snapshot() {
+    return clone({ version: 1, config: this.config, randomState: this.random.getState(), tickIndex: this.tickIndex,
+      currentTimeMs: this.currentTimeMs, batteryLevel: this.batteryLevel, lastReading: this.lastReading });
+  }
+
+  static restore(snapshot) {
+    if (snapshot.version !== 1 || !Number.isSafeInteger(snapshot.tickIndex) || snapshot.tickIndex < 0 ||
+      !Number.isSafeInteger(snapshot.randomState) || snapshot.randomState < 0 || snapshot.randomState > 0xffffffff ||
+      !Number.isFinite(snapshot.batteryLevel) || snapshot.batteryLevel < 0 || snapshot.batteryLevel > 100) throw new Error("Invalid saved simulator state");
+    const device = new VirtualDeviceSimulator(snapshot.config);
+    const expectedClock = +new Date(device.config.startTime) + snapshot.tickIndex * device.config.tickIntervalMs;
+    if (snapshot.currentTimeMs !== expectedClock || !Number.isFinite(+new Date(expectedClock))) throw new Error("Saved simulator clock is inconsistent");
+    device.random.setState(snapshot.randomState);
+    Object.assign(device, { tickIndex: snapshot.tickIndex, currentTimeMs: snapshot.currentTimeMs,
+      batteryLevel: snapshot.batteryLevel, lastReading: snapshot.lastReading });
+    return device;
   }
 
   getLocation() {

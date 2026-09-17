@@ -39,8 +39,9 @@ describe("simulator routes", () => {
     auth = { Authorization: `Bearer ${issueToken({ id: f.reviewer._id, role: "admin" })}` };
   }, 15000);
 
-  beforeEach(() => {
+  beforeEach(async () => {
     simulatorManager.clear();
+    await require("../models/SimulatorDevice").deleteMany({});
     persistSimulationReading.mockResolvedValue({ _id: "telemetry-1" });
   });
 
