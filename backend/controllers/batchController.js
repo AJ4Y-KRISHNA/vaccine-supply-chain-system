@@ -167,15 +167,12 @@ function annotateLifecycleWithTransactions(lifecycle = [], transactions = []) {
       return actionKeywords.some((keyword) => haystack.includes(keyword));
     });
 
-    if (matchIndex === -1 && orderedTransactions[index] && !used.has(index)) {
-      matchIndex = index;
-    }
-
     const match = matchIndex >= 0 ? orderedTransactions[matchIndex] : null;
     if (matchIndex >= 0) used.add(matchIndex);
 
     return {
       ...entry,
+      transactionCorrelation: match ? "inferred-label-match-not-chain-proof" : "unmatched",
       txHash: match?.txHash || "",
       txLabel: match?.label || "",
       txSource: match?.source || "",

@@ -1,336 +1,97 @@
 const { ethers } = require("ethers");
-
-// Fallback empty ABI for compilation safety if artifact isn't generated yet
-let contractABI = [];
-try {
-    contractABI = require("../../blockchain/artifacts/contracts/VaccineSupplyChain.sol/VaccineSupplyChain.json").abi;
-} catch (e) {
-    console.warn("VaccineSupplyChain artifact not found. Please compile hardhat contracts.");
-}
-
-const provider = new ethers.JsonRpcProvider(process.env.RPC_URL || "http://127.0.0.1:8545");
-const privateKey =
-    process.env.PRIVATE_KEY ||
-    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-
-// Use fallback address if not provided
-const contractAddress = process.env.CONTRACT_ADDRESS || "0x5FbDB2315678afecb367f032d93F642f64180aa3";
-const readContract = new ethers.Contract(contractAddress, contractABI, provider);
 let txQueue = Promise.resolve();
-let nextNonce = null;
-
-function createWallet() {
-    return new ethers.Wallet(privateKey, provider);
+let provider;
+function configuration(role = "writer") {
+  const rpc = new URL(process.env.RPC_URL || "http://127.0.0.1:8545");
+  if (rpc.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(rpc.hostname) || rpc.username || rpc.password) {
+    throw new Error("This software prototype only supports a loopback local blockchain RPC");
+  }
+  if (!ethers.isAddress(process.env.CONTRACT_ADDRESS || "")) throw new Error("Configure the deployed local CONTRACT_ADDRESS");
+  const abi = require("../../blockchain/artifacts/contracts/VaccineSupplyChain.sol/VaccineSupplyChain.json").abi;
+  provider ||= new ethers.JsonRpcProvider(rpc.href);
+  const variable = { writer: "PRIVATE_KEY", production: "PRODUCTION_PRIVATE_KEY", lab: "LAB_PRIVATE_KEY" }[role];
+  let key = process.env[variable];
+  // Explicitly opted-in PUBLIC Hardhat accounts: never fund or use outside chain 31337.
+  if (process.env.LOCAL_CHAIN_DEMO === "true") {
+    key = ethers.HDNodeWallet.fromPhrase("test test test test test test test test test test test junk", undefined,
+      "m/44'/60'/0'/0/" + { writer: 0, production: 1, lab: 2 }[role]).privateKey;
+  }
+  return { abi, address: process.env.CONTRACT_ADDRESS, key };
 }
-
-function shouldResetNonce(error) {
-    const message = String(error?.message || "").toLowerCase();
-    return error?.code === "NONCE_EXPIRED" || message.includes("nonce too low") || message.includes("nonce has already been used");
+async function contractFor(role, write = false) {
+  const config = configuration(role);
+  if ((await provider.getNetwork()).chainId !== 31337n) throw new Error("Local chain ID 31337 required");
+  if (await provider.getCode(config.address) === "0x") throw new Error("No contract deployed at configured address");
+  if (write && !config.key) throw new Error("Configure a local " + role + " signing key");
+  return new ethers.Contract(config.address, config.abi, write ? new ethers.Wallet(config.key, provider) : provider);
 }
-
-async function allocateNonce(address) {
-    if (nextNonce === null) {
-        nextNonce = await provider.getTransactionCount(address, "pending");
-    }
-    const current = nextNonce;
-    nextNonce += 1;
-    return current;
+function write(method, args, role = "writer") {
+  const next = txQueue.then(async () => {
+    const contract = await contractFor(role, true);
+    // Fresh pending nonce per signer. Never retry an uncertain send automatically.
+    const nonce = Number(await provider.send("eth_getTransactionCount", [contract.runner.address, "pending"]));
+    const transaction = await contract[method](...args, { nonce });
+    const receipt = await transaction.wait();
+    if (receipt?.status !== 1) throw new Error("Local transaction was not confirmed successfully");
+    return receipt;
+  });
+  txQueue = next.catch(() => {});
+  return next;
 }
-
-async function enqueueWrite(executor) {
-    const next = txQueue.then(async () => {
-        const wallet = createWallet();
-        const contract = new ethers.Contract(contractAddress, contractABI, wallet);
-        try {
-            const nonce = await allocateNonce(wallet.address);
-            return await executor(contract, nonce);
-        } catch (error) {
-            if (shouldResetNonce(error)) {
-                nextNonce = null;
-                const retryNonce = await allocateNonce(wallet.address);
-                return executor(contract, retryNonce);
-            }
-            throw error;
-        }
-    });
-
-    txQueue = next.catch(() => undefined);
-    return next;
-}
-
-function mockReceipt(label) {
-    console.warn(`Mocking blockchain commit for ${label} due to missing ABI/Contract.`);
-    return {
-        hash: "0x" + Math.random().toString(16).slice(2, 18) + "...",
-        transactionHash: "0x" + Math.random().toString(16).slice(2, 18) + "...",
-    };
-}
-
-function extractHash(receipt) {
-    return receipt?.hash || receipt?.transactionHash || "";
-}
-
-function toWholeNumber(value) {
-    const parsed = Math.floor(Number(value) || 0);
-    return Number.isFinite(parsed) ? parsed : 0;
-}
-
-async function recordOnBlockchain(decisionData) {
-    try {
-        const priorityValue =
-          decisionData.priority_score ||
-          decisionData.status ||
-          decisionData.risk_flag ||
-          "Stable";
-
-        const targetCenter = decisionData.targetCenter || "Unknown Center";
-        const recommendedUnits = toWholeNumber(decisionData.recommended_units);
-
-        if (!readContract.recordDistribution) {
-            return mockReceipt("distribution");
-        }
-
-        return enqueueWrite(async (contract, nonce) => {
-            const tx = await contract.recordDistribution(
-                targetCenter,
-                recommendedUnits,
-                String(priorityValue),
-                { nonce }
-            );
-            return tx.wait();
-        });
-    } catch (error) {
-        console.error("Blockchain commit failed:", error);
-        throw error;
-    }
-}
-
-async function registerBatchOnChain(batchId, vaccineType, quantity) {
-    if (!readContract.registerBatch) {
-        return mockReceipt("batch registration");
-    }
-    return enqueueWrite(async (contract, nonce) => {
-        const tx = await contract.registerBatch(batchId, vaccineType, quantity, { nonce });
-        return tx.wait();
-    });
-}
-
-async function mintInventoryCertificateOnChain(batchId, vaccineType, predictedDemand, certificateUri) {
-    if (!readContract.mintInventoryCertificate) {
-        return mockReceipt("inventory certificate");
-    }
-
-    return enqueueWrite(async (contract, nonce) => {
-        const tx = await contract.mintInventoryCertificate(
-            String(batchId || "UNTRACKED"),
-            String(vaccineType || "Unknown"),
-            toWholeNumber(predictedDemand),
-            String(certificateUri || ""),
-            { nonce }
-        );
-        return tx.wait();
-    });
-}
-
-async function approveBatchReleaseOnChain(batchId, role) {
-    if (!readContract.approveBatchRelease) {
-        return mockReceipt("batch release approval");
-    }
-
-    return enqueueWrite(async (contract, nonce) => {
-        const tx = await contract.approveBatchRelease(
-            String(batchId || "UNTRACKED"),
-            String(role || "Production"),
-            { nonce }
-        );
-        return tx.wait();
-    });
-}
-
-async function logLifecycleEventOnChain({
-    batchId,
-    actorRole,
-    action,
-    location = "",
-    details = "",
-    quantity = 0,
-}) {
-    if (!readContract.logLifecycleEvent) {
-        return mockReceipt(`${actorRole || "unknown"} lifecycle event`);
-    }
-
-    return enqueueWrite(async (contract, nonce) => {
-        const tx = await contract.logLifecycleEvent(
-            String(batchId || "UNTRACKED"),
-            String(actorRole || "System"),
-            String(action || "State Change"),
-            String(location || "Unknown"),
-            String(details || ""),
-            toWholeNumber(quantity),
-            { nonce }
-        );
-        return tx.wait();
-    });
-}
-
-async function updateBatchStatusOnChain(batchId, status) {
-    if (!readContract.updateBatchStatus) {
-        return mockReceipt("batch status update");
-    }
-
-    return enqueueWrite(async (contract, nonce) => {
-        const tx = await contract.updateBatchStatus(
-            String(batchId || "UNTRACKED"),
-            String(status || "Updated"),
-            { nonce }
-        );
-        return tx.wait();
-    });
-}
-
-async function getBatchFromChain(batchId) {
-    const normalizedBatchId = String(batchId || "");
-    if (!readContract.getBatch) {
-        return {
-            batchId: normalizedBatchId,
-            vaccineType: "",
-            quantity: 0,
-            manufacturer: "",
-            status: "Unavailable",
-        };
-    }
-
-    try {
-        const batch = await readContract.getBatch(normalizedBatchId);
-        return {
-            batchId: batch?.[0] || normalizedBatchId,
-            vaccineType: batch?.[1] || "",
-            quantity: Number(batch?.[2] || 0),
-            manufacturer: batch?.[3] || "",
-            status: batch?.[4] || "",
-        };
-    } catch (_error) {
-        return {
-            batchId: normalizedBatchId,
-            vaccineType: "",
-            quantity: 0,
-            manufacturer: "",
-            status: "Lifecycle Only",
-        };
-    }
-}
-
-async function getBatchLifecycleFromChain(batchId) {
-    const normalizedBatchId = String(batchId || "");
-
-    if (!readContract.getLifecycleCount || !readContract.getLifecycleEvent) {
-        return {
-            batchId: normalizedBatchId,
-            batch: await getBatchFromChain(normalizedBatchId),
-            lifecycleCount: 0,
-            lifecycle: [],
-        };
-    }
-
-    const lifecycleCount = Number(await readContract.getLifecycleCount(normalizedBatchId));
-    const lifecycle = [];
-
-    for (let index = 0; index < lifecycleCount; index += 1) {
-        const event = await readContract.getLifecycleEvent(normalizedBatchId, index);
-        lifecycle.push({
-            batchId: event?.[0] || normalizedBatchId,
-            actorRole: event?.[1] || "",
-            action: event?.[2] || "",
-            location: event?.[3] || "",
-            details: event?.[4] || "",
-            quantity: Number(event?.[5] || 0),
-            timestamp: Number(event?.[6] || 0),
-            actor: event?.[7] || "",
-        });
-    }
-
-    return {
-        batchId: normalizedBatchId,
-        batch: await getBatchFromChain(normalizedBatchId),
-        lifecycleCount,
-        lifecycle,
-    };
-}
-
-async function getInventoryCertificateFromChain(batchId) {
-    const normalizedBatchId = String(batchId || "");
-    if (!readContract.getInventoryCertificate) {
-        return {
-            batchId: normalizedBatchId,
-            vaccineType: "",
-            predictedDemand: 0,
-            certificateUri: "",
-            issuedAt: 0,
-            issuer: "",
-        };
-    }
-
-    try {
-        const cert = await readContract.getInventoryCertificate(normalizedBatchId);
-        return {
-            batchId: cert?.[0] || normalizedBatchId,
-            vaccineType: cert?.[1] || "",
-            predictedDemand: Number(cert?.[2] || 0),
-            certificateUri: cert?.[3] || "",
-            issuedAt: Number(cert?.[4] || 0),
-            issuer: cert?.[5] || "",
-        };
-    } catch (_error) {
-        return {
-            batchId: normalizedBatchId,
-            vaccineType: "",
-            predictedDemand: 0,
-            certificateUri: "",
-            issuedAt: 0,
-            issuer: "",
-        };
-    }
-}
-
-async function getBatchReleaseStateFromChain(batchId) {
-    const normalizedBatchId = String(batchId || "");
-    if (!readContract.getReleaseState) {
-        return {
-            productionApproved: false,
-            labApproved: false,
-            releaseVisible: false,
-            status: "Unavailable",
-        };
-    }
-
-    try {
-        const state = await readContract.getReleaseState(normalizedBatchId);
-        return {
-            productionApproved: Boolean(state?.[0]),
-            labApproved: Boolean(state?.[1]),
-            releaseVisible: Boolean(state?.[2]),
-            status: state?.[3] || "",
-        };
-    } catch (_error) {
-        return {
-            productionApproved: false,
-            labApproved: false,
-            releaseVisible: false,
-            status: "Unavailable",
-        };
-    }
-}
-
-module.exports = {
-    recordOnBlockchain,
-    registerBatchOnChain,
-    mintInventoryCertificateOnChain,
-    approveBatchReleaseOnChain,
-    logLifecycleEventOnChain,
-    updateBatchStatusOnChain,
-    getBatchFromChain,
-    getBatchLifecycleFromChain,
-    getInventoryCertificateFromChain,
-    getBatchReleaseStateFromChain,
-    extractHash,
+const whole = value => {
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < 0) throw new Error("Chain quantity must be a nonnegative safe integer");
+  return number;
 };
+const extractHash = receipt => {
+  const value = receipt?.hash || receipt?.transactionHash || "";
+  return /^0x[0-9a-f]{64}$/i.test(value) ? value : "";
+};
+const recordOnBlockchain = data => write("recordDistribution", [String(data.targetCenter || "Unknown Center"), whole(data.recommended_units || 0), String(data.priority_score || data.status || data.risk_flag || "Stable")]);
+const registerBatchOnChain = (id, type, quantity) => write("registerBatch", [id, type, whole(quantity)]);
+const mintInventoryCertificateOnChain = (id, type, demand, uri) => write("mintInventoryCertificate", [id, type, whole(demand), uri || ""]);
+const approveBatchReleaseOnChain = (id, role) => {
+  if (!["Production", "Lab Testing"].includes(role)) throw new Error("Invalid release role");
+  return write("approveBatchRelease", [id, role], role === "Production" ? "production" : "lab");
+};
+const updateBatchStatusOnChain = (id, status) => write("updateBatchStatus", [id, status]);
+const logLifecycleEventOnChain = ({ batchId, actorRole, action, location = "", details = "", quantity = 0 }) =>
+  write("logLifecycleEvent", [String(batchId), String(actorRole), String(action), String(location), String(details), whole(quantity)]);
+async function getBatchFromChain(id) {
+  const row = await (await contractFor("writer")).getBatch(id);
+  if (!row[0]) return null;
+  return { batchId: row[0], vaccineType: row[1], quantity: Number(row[2]), manufacturer: row[3], status: row[4] };
+}
+async function getBatchLifecycleFromChain(id) {
+  const contract = await contractFor("writer"), count = Number(await contract.getLifecycleCount(id));
+  const lifecycle = [];
+  for (let index = 0; index < count; index++) {
+    const row = await contract.getLifecycleEvent(id, index);
+    lifecycle.push({ batchId: row[0], actorRole: row[1], action: row[2], location: row[3], details: row[4], quantity: Number(row[5]), timestamp: Number(row[6]), actor: row[7] });
+  }
+  return { batchId: id, batch: await getBatchFromChain(id), lifecycleCount: count, lifecycle };
+}
+async function getInventoryCertificateFromChain(id) {
+  const row = await (await contractFor("writer")).getInventoryCertificate(id);
+  return { batchId: row[0], vaccineType: row[1], predictedDemand: Number(row[2]), certificateUri: row[3], issuedAt: Number(row[4]), issuer: row[5] };
+}
+async function getBatchReleaseStateFromChain(id) {
+  const row = await (await contractFor("writer")).getReleaseState(id);
+  return { productionApproved: row[0], labApproved: row[1], releaseVisible: row[2], status: row[3] };
+}
+async function anchorAuditOnChain(eventId, digest) {
+  const contract = await contractFor("writer");
+  let stored = await contract.auditDigests(eventId);
+  if (stored !== ethers.ZeroHash && stored !== digest) throw new Error("On-chain audit digest conflict");
+  let receipt;
+  if (stored === ethers.ZeroHash) receipt = await write("anchorAudit", [eventId, digest]);
+  stored = await contract.auditDigests(eventId);
+  if (stored !== digest) throw new Error("Audit anchor verification failed");
+  return { digest: stored, txHash: extractHash(receipt), chainId: 31337, contractAddress: await contract.getAddress(), verified: true };
+}
+async function verifyAuditOnChain(eventId, digest) {
+  return (await (await contractFor("writer")).auditDigests(eventId)) === digest;
+}
+module.exports = { recordOnBlockchain, registerBatchOnChain, mintInventoryCertificateOnChain, approveBatchReleaseOnChain,
+  logLifecycleEventOnChain, updateBatchStatusOnChain, getBatchFromChain, getBatchLifecycleFromChain,
+  getInventoryCertificateFromChain, getBatchReleaseStateFromChain, extractHash, anchorAuditOnChain, verifyAuditOnChain };

@@ -10,5 +10,9 @@ router.post("/create", requireIdentity, protectOperation(["admin", "manufacturer
 
 router.get("/verify/:batchId", batchRead, verifyBatch);
 router.get("/:batchId/lifecycle", batchRead, getBatchLifecycle);
+router.get("/:batchId/audit-anchors", batchRead, async (req, res) => {
+  try { res.json({ entries: await require("../services/auditAnchoring").inspectBatch(req.params.batchId) }); }
+  catch (_) { res.status(503).json({ error: "Audit anchor inspection unavailable" }); }
+});
 
 module.exports = router;

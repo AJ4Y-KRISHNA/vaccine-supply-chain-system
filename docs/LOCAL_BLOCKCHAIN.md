@@ -1,0 +1,15 @@
+# Local-only blockchain checkpoint
+
+This prototype supports loopback HTTP RPC and chain ID 31337 only. No paid network or real funds are needed. Compile and deploy the updated contract; an older deployment is not compatible with its authorization or audit-anchor interface.
+
+From `blockchain`, run `npm test`, `npm run node`, then in another terminal `npm run deploy:local`. Set the resulting `CONTRACT_ADDRESS` and `RPC_URL` in ignored `backend/.env`. For this synthetic environment explicitly set `LOCAL_CHAIN_DEMO=true`; this uses PUBLIC Hardhat test accounts 0 (writer), 1 (production), 2 (lab). Never fund these accounts. Otherwise configure distinct signing keys explicitly.
+
+Contract mutations require an owner-authorized writer. Batch IDs cannot be overwritten. Release requires both distinct configured production/lab addresses; supplying a role string alone grants nothing. These addresses are controlled by one prototype backend: this demonstrates contract-level separation, not independently governed organizational approval or a professional quality certification. Legacy API operations retain their application role checks.
+
+Set `AUDIT_ANCHOR_ENABLED=true` to poll the append-only `ColdChainAudit` collection every five seconds. Each event ID and canonical JSON SHA-256 digest is anchored; no temperature values, patient details or reasons are sent on-chain. `AuditAnchor` stores retry state and confirmed receipts separately. A duplicate identical hash is idempotent; a different hash for the same event is rejected. A chain outage never blocks telemetry evaluation or releases a hold. The audit document is the durable queue, so no event is lost between its save and queue discovery.
+
+`GET /api/batches/:batchId/audit-anchors` requires existing batch read permission and recomputes evidence hashes against the configured live chain. A saved `confirmed` flag is not proof if the chain was reset or evidence changed. Local Hardhat state is ephemeral; resetting the node invalidates prior evidence until explicitly reconciled/re-anchored. Old transaction strings and records are retained, not relabeled verified. The legacy lifecycle transaction association is explicitly labeled an inferred label match, not cryptographic proof.
+
+There are no fabricated receipts or success-on-RPC-failure fallbacks. Non-anchor operational writes are not yet a transactional outbox; a crash after a successful chain write but before a database save can still require reconciliation. One backend process owns the queues. Direct database administrators can alter MongoDB; only an independently preserved on-chain digest can reveal such a change. A local developer chain is not an independent immutable public ledger.
+
+Verification: four real in-process Hardhat tests cover constructor/signers, unauthorized mutations, duplicate batch registration, two-address release, writer revocation and immutable/idempotent anchors. Three backend tests cover canonical hashing, outage retry, saved-flag verification and queued-evidence tampering. Full backend: 104 tests passed at this checkpoint.

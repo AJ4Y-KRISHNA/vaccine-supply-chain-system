@@ -2,6 +2,37 @@
 pragma solidity ^0.8.20;
 
 contract VaccineSupplyChain {
+    address public immutable owner;
+    address public immutable productionSigner;
+    address public immutable labSigner;
+    mapping(address => bool) public writers;
+    mapping(bytes32 => bytes32) public auditDigests;
+    event WriterUpdated(address indexed writer, bool enabled);
+    event AuditAnchored(bytes32 indexed eventId, bytes32 digest, address indexed writer);
+
+    constructor(address production, address lab) {
+        require(production != address(0) && lab != address(0) && production != lab, "Distinct release signers required");
+        owner = msg.sender;
+        productionSigner = production;
+        labSigner = lab;
+        writers[msg.sender] = true;
+    }
+    modifier onlyWriter() { require(writers[msg.sender], "Writer required"); _; }
+    function setWriter(address writer, bool enabled) external {
+        require(msg.sender == owner, "Owner required");
+        require(writer != address(0), "Zero writer");
+        writers[writer] = enabled;
+        emit WriterUpdated(writer, enabled);
+    }
+    function anchorAudit(bytes32 eventId, bytes32 digest) external onlyWriter {
+        require(eventId != bytes32(0) && digest != bytes32(0), "Empty anchor");
+        bytes32 existing = auditDigests[eventId];
+        require(existing == bytes32(0) || existing == digest, "Audit digest conflict");
+        if (existing == bytes32(0)) {
+            auditDigests[eventId] = digest;
+            emit AuditAnchored(eventId, digest, msg.sender);
+        }
+    }
     struct Distribution {
         string targetCenter;
         uint256 recommendedUnits;
@@ -106,7 +137,7 @@ contract VaccineSupplyChain {
         string memory _targetCenter,
         uint256 _recommendedUnits,
         string memory _priorityScore
-    ) public {
+    ) public onlyWriter {
         distributions.push(
             Distribution({
                 targetCenter: _targetCenter,
@@ -131,7 +162,7 @@ contract VaccineSupplyChain {
         uint256 _recommendedUnits,
         string memory _priorityScore,
         string memory _details
-    ) public {
+    ) public onlyWriter {
         recordDistribution(_targetCenter, _recommendedUnits, _priorityScore);
         _logLifecycleEvent(
             _batchId,
@@ -147,7 +178,9 @@ contract VaccineSupplyChain {
         string memory _batchId,
         string memory _vaccineType,
         uint _quantity
-    ) public {
+    ) public onlyWriter {
+        require(bytes(_batchId).length > 0, "Batch ID required");
+        require(bytes(batches[_batchId].batchId).length == 0, "Batch already registered");
         batches[_batchId] = Batch(
             _batchId,
             _vaccineType,
@@ -183,8 +216,9 @@ contract VaccineSupplyChain {
         string memory _vaccineType,
         uint256 _predictedDemand,
         string memory _certificateUri
-    ) public {
+    ) public onlyWriter {
         require(bytes(_batchId).length > 0, "Batch ID required");
+        require(bytes(batches[_batchId].batchId).length > 0, "Batch not found");
 
         inventoryCertificates[_batchId] = InventoryCertificate({
             batchId: _batchId,
@@ -228,8 +262,10 @@ contract VaccineSupplyChain {
         bytes32 roleHash = keccak256(bytes(_role));
 
         if (roleHash == keccak256(bytes("Production"))) {
+            require(msg.sender == productionSigner, "Production signer required");
             batches[_batchId].productionApproved = true;
         } else if (roleHash == keccak256(bytes("Lab Testing"))) {
+            require(msg.sender == labSigner, "Lab signer required");
             batches[_batchId].labApproved = true;
         } else {
             revert("Invalid release role");
@@ -269,8 +305,9 @@ contract VaccineSupplyChain {
     function updateBatchStatus(
         string memory _batchId,
         string memory _status
-    ) public {
+    ) public onlyWriter {
         require(bytes(_batchId).length > 0, "Batch ID required");
+        require(bytes(batches[_batchId].batchId).length > 0, "Batch not found");
 
         if (bytes(batches[_batchId].batchId).length > 0) {
             batches[_batchId].status = _status;
@@ -286,7 +323,7 @@ contract VaccineSupplyChain {
         string memory _location,
         string memory _details,
         uint256 _quantity
-    ) public {
+    ) public onlyWriter {
         _logLifecycleEvent(
             _batchId,
             _actorRole,
