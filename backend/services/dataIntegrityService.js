@@ -33,7 +33,9 @@ function buildIntegrityReport({ batches, shipments, logs, orders, users }) {
   const issues = { orphanShipments, unknownOwners, orphanTelemetry, conflictingTelemetry, duplicateBatchIds, duplicateShipmentIds, unallocatedApprovedOrders };
   return { readOnly: true, counts: { batches: batches.length, shipments: shipments.length, temperatureLogs: logs.length, orders: orders.length },
     issueCounts: Object.fromEntries(Object.entries(issues).map(([name, entries]) => [name, entries.length])), issues,
-    nextAction: "Provide explicit record-ID-to-batch and batch-to-manufacturer mappings. Do not infer mappings from similar names or create replacement clinical records." };
+    nextAction: Object.values(issues).some(entries => entries.length)
+      ? "Provide explicit record-ID-to-batch and batch-to-manufacturer mappings. Do not infer mappings from similar names or create replacement clinical records."
+      : "No issues found by these seven relationship checks; this is not a clinical or comprehensive inventory certification." };
 }
 
 module.exports = { buildIntegrityReport };

@@ -68,8 +68,10 @@ async function main() {
   for (const role of Object.keys(actors)) actors[role].token = (await call("POST", "/auth/login", null, { email: actors[role].email, role, password })).token;
   console.log("Acceptance: authenticated four isolated synthetic accounts");
   const batchId = "SYSTEM-ACCEPTANCE-DEMO", vaccineType = "SYNTHETIC TEST PRODUCT — NOT CLINICAL";
-  const manufactured = await call("POST", "/manufacturer/workflow", "manufacturer", { batchId, vaccineType, quantity: 100,
-    expiresAt: "2030-12-31T00:00:00Z", supplier: "SYNTHETIC Supplier", materialQuantity: 100, remarks: "SYNTHETIC fixture quality report only" });
+  await call("POST", "/manufacturer/raw-materials", "manufacturer", { batchId, supplier: "SYNTHETIC Supplier", quantity: 100, materialType: "SYNTHETIC ONLY", unit: "test units" });
+  await call("POST", "/manufacturer/produce", "manufacturer", { batchId, vaccineType, quantity: 100 });
+  const manufactured = await call("POST", "/manufacturer/batch", "manufacturer", { batchId, vaccineType, quantity: 100, expiresAt: "2030-12-31T00:00:00Z" });
+  await call("POST", "/manufacturer/batch/report", "manufacturer", { batchId, vaccineType, quantity: 100, materialQuantity: 100, remarks: "SYNTHETIC fixture quality report only" });
   assert.equal(manufactured.batch.releaseVisibleToExternal, false);
   await call("POST", `/manufacturer/batch/${batchId}/sign-release`, "manufacturer", { role: "Production" });
   await call("POST", `/manufacturer/batch/${batchId}/sign-release`, "manufacturer", { role: "Lab Testing" });

@@ -181,7 +181,7 @@ exports.produceVaccine = async (req, res) => {
       quantity: req.body.quantity || 0,
     });
 
-    await Batch.updateOne(
+    const batchUpdate = await Batch.updateOne(
       { batchId: req.body.batchId },
       {
         $set: {
@@ -195,7 +195,7 @@ exports.produceVaccine = async (req, res) => {
     prod.txHash = extractHash(lifecycleReceipt);
     await prod.save();
 
-    if (req.body.batchId) {
+    if (req.body.batchId && batchUpdate.matchedCount > 0) {
       await updateBatchStatusOnChain(req.body.batchId, "Production Complete");
     }
 
@@ -216,8 +216,8 @@ exports.createBatch = async (req, res) => {
         batchId,
         vaccineType,
         quantity,
-          manufacturer: req.body.manufacturer || "Manufacturer",
-          expiresAt: req.body.expiresAt,
+        manufacturer: req.body.manufacturer || "Manufacturer",
+        expiresAt: req.body.expiresAt,
         txHash: "",
         status: "Awaiting Multi-Sign Release",
         releaseStage: "Awaiting Production Sign-Off",
@@ -232,7 +232,7 @@ exports.createBatch = async (req, res) => {
       await batch.save();
     }
 
-    // blockchain write (mock-safe if ABI missing)
+    // Explicit local-chain write; no fabricated success receipt.
     let txHash = "";
     try {
       const receipt = await registerBatchOnChain(batchId, vaccineType, quantity);

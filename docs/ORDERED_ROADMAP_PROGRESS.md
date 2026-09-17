@@ -12,8 +12,8 @@ Date: 2026-09-17. This tracks the ten recommendations in section 13 of the proje
 | 6. Secure local blockchain integration | Implemented; integrated acceptance follows | Writer allowlist, distinct release addresses, no mock receipts, loopback/31337 guard, durable audit-hash discovery/retry and live verification. Four real Hardhat tests plus three backend anchoring tests pass. See LOCAL_BLOCKCHAIN.md for limitations. |
 | 7. Validate forecasting | Reproducible prototype evaluation implemented | Deterministic baselines, chronological selection/holdout metrics, explicit provenance, CSV restrictions and corrected experimental CNN window. Five Python tests and API smoke pass. Real-demand validation remains a research prerequisite, not a completed claim. |
 | 8. Constrained supply allocation | Advisory prototype implemented | Priority/FEFO multi-destination preview, expiry-at-arrival, stock/hold/release checks and shared transport/hospital capacity. Admin UI and persisted explanations. Explicit existing single-batch approval remains execution boundary; no global-optimum or automatic split-order claim. |
-| 9. Full acceptance scenario | Passed in isolated local services | 33 actual HTTP calls: manufacture → two-address release → Python forecast → constrained plan → allocation → excursion/hold → reviewed clearance → delivery → eight live audit hash verifications. No chain/AI mocks. See SYSTEM_ACCEPTANCE.md. |
-| 10. Research evaluation | Pending | Full-system metrics and research results cannot be asserted before the preceding work. |
+| 9. Full acceptance scenario | Passed in isolated local services | Final run: 36 actual HTTP calls, manufacture → two-address release → Python forecast → constrained plan → allocation → excursion/hold → reviewed clearance → delivery → eight live audit hash verifications. No chain/AI mocks. See SYSTEM_ACCEPTANCE.md. |
+| 10. Research evaluation | Synthetic evaluation completed; real-world validation outstanding | Eight anomaly scenarios, explained outcomes, measured local persistence timings, three baseline comparisons on reproducible chronological data, 100 allocation trials and integrated chain verification. Findings and limitations in RESEARCH_EVALUATION.md; no clinical/production claim. |
 
 ## Step 2: implemented behavior
 
@@ -52,7 +52,11 @@ The fresh audit reports zero orphan shipments, unknown batch owners, orphan/conf
 
 ## Boundaries
 
-This is single-process prototype allocation, not a distributed transaction or production inventory ledger. Other legacy shipment-creation paths still need coordinated quantity enforcement in the later inventory/security work. A crash after a blockchain write but before the shipment save can still repeat the chain write on retry; resolving that requires the later durable outbox/idempotent-chain design. No stock returns, order amendments, split allocations or clinical eligibility judgments are invented here.
+This is single-process prototype allocation, not a distributed transaction or production inventory ledger. Direct shipment-creation paths now share conservative quantity enforcement with order allocation. A crash after a non-anchor operational blockchain write but before the shipment save can still repeat that write on retry; only audit anchoring currently has durable discovery and idempotent on-chain keys. No stock returns, order amendments, automatic split-order execution or clinical eligibility judgments are invented here. The ten steps have local prototype implementations/evidence, not production certification; real-world research validation remains outstanding.
+
+## Final local verification
+
+109 backend tests (15 suites), 23 frontend tests (8 suites), five Python baseline tests and four real Hardhat tests passed: **141 automated tests**, plus the integrated acceptance runs and the separate synthetic evaluation scripts. The final frontend production build passed. All changes remain on local branch `codex/ordered-roadmap-20260917`; no push or deployment to a public service was performed.
 
 ## Step 4–5 verification
 

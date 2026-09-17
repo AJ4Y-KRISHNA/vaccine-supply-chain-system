@@ -87,7 +87,7 @@ function HeatmapPanel({ data }) {
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h3 className="text-[1.1rem] font-semibold text-[#42566f]">Global Demand Heatmap</h3>
-          <p className="mt-1 text-[12px] text-[#8a9ab0]">CNN-LSTM forecast outlook by region and vaccine priority.</p>
+          <p className="mt-1 text-[12px] text-[#8a9ab0]">Demo demand outlook from order history; not a validated regional forecast.</p>
         </div>
         <div className="rounded-full bg-[#eef5ff] px-3 py-1 text-[11px] font-semibold text-[#3278d7]">
           Next-month planning

@@ -1,6 +1,6 @@
 # Integrated software-only acceptance — 2026-09-17
 
-**PASS**: 33 HTTP requests through the actual Express application, actual local Python FastAPI service, actual MongoDB, and a newly deployed Hardhat contract on chain 31337. No chain or AI mocks were used in this run. All accounts, inventory and policies were isolated synthetic fixtures in a randomly named test database.
+**PASS**: the initial combined-manufacturing run used 33 HTTP requests; the final run used 36, also checking the separate raw-material, production, batch and report endpoints before release. Both ran through the actual Express application, actual local Python FastAPI service, actual MongoDB, and a newly deployed Hardhat contract on chain 31337. No chain or AI mocks were used. All accounts, inventory and policies were isolated synthetic fixtures in randomly named test databases.
 
 Verified sequence:
 
@@ -15,7 +15,7 @@ Verified sequence:
 9. Distributor verifies/supplies the shipment; hospital confirms delivery of 40 units.
 10. Anchor all eight cold-chain audit events on the real local chain; recompute and verify all eight digests. Replaying the worker creates no new anchors.
 
-Four telemetry HTTP requests took 26–76 ms in this single run (reported upper-middle sample 55 ms). This is not a representative latency distribution or production benchmark. No real product, patient, medical approval, physical temperature sensor or actual vaccine delivery is represented.
+In the final run, four telemetry HTTP requests took 36–52 ms (reported upper-middle sample 52 ms). This is not a representative latency distribution or production benchmark. No real product, patient, medical approval, physical temperature sensor or actual vaccine delivery is represented.
 
 Reproduce from `backend`:
 
