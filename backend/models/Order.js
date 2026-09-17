@@ -14,6 +14,10 @@ const orderSchema = new mongoose.Schema(
       index: true,
     },
     hospital: String,
+    // auditBatchId remains a historical order reference, never a physical batch ID.
+    allocatedBatchId: String,
+    shipmentId: String,
+    distributor: String,
     centerId: String,
     region: String,
     vaccineType: String,

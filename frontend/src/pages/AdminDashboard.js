@@ -35,6 +35,7 @@ import BlockchainLog from "../components/BlockchainLog";
 import { useToast } from "../components/Toast";
 import SentimentFeedbackPanel from "../components/Admin/SentimentFeedbackPanel";
 import TemperatureAlertPanel from "../components/TemperatureAlertPanel";
+import OrderAllocationFields from "../components/Admin/OrderAllocationFields";
 import {
   fetchAdminMonitoring,
   fetchAdminOrders,
@@ -165,6 +166,10 @@ const AdminDashboard = () => {
   const [selectedAuditBatchId, setSelectedAuditBatchId] = useState("");
   const [adminOrders, setAdminOrders] = useState([]);
   const [decisionNotes, setDecisionNotes] = useState({});
+  const [allocations, setAllocations] = useState({});
+  const [allocationOptions, setAllocationOptions] = useState([]);
+  const [distributorOptions, setDistributorOptions] = useState([]);
+  const [reviewingOrder, setReviewingOrder] = useState("");
   const [loadingPage, setLoadingPage] = useState(true);
   const [loadingSentiment, setLoadingSentiment] = useState(false);
   const [loading, setLoading] = useState({ users: false, monitoring: false, reports: false, workflow: false, orders: false });
@@ -230,8 +235,12 @@ const AdminDashboard = () => {
       setLoadingKey("orders", true);
       const response = await fetchAdminOrders();
       setAdminOrders(response?.orders || []);
+      setAllocationOptions(response?.allocationOptions || []);
+      setDistributorOptions(response?.distributors || []);
     } catch (_error) {
       setAdminOrders([]);
+      setAllocationOptions([]);
+      setDistributorOptions([]);
       if (!silent) addToast("error", "Order queue failed to load");
     } finally {
       setLoadingKey("orders", false);
@@ -266,14 +275,18 @@ const AdminDashboard = () => {
 
   const reviewOrderDecision = async (orderId, decision) => {
     try {
+      setReviewingOrder(orderId);
       await reviewAdminOrder(orderId, {
         decision,
         note: decisionNotes[orderId] || "",
+        ...(allocations[orderId] || {}),
       });
       addToast("success", `Order ${decision.toLowerCase()}d successfully`);
       await Promise.allSettled([loadOrders(true), loadMonitoring(true), loadReports(true), loadWorkflow(true)]);
-    } catch (_error) {
-      addToast("error", `Unable to ${decision.toLowerCase()} order`);
+    } catch (error) {
+      addToast("error", error.response?.data?.error || `Unable to ${decision.toLowerCase()} order`);
+    } finally {
+      setReviewingOrder("");
     }
   };
 
@@ -748,7 +761,7 @@ const AdminDashboard = () => {
             <div className="mb-4 rounded-[14px] border border-[#e4edf8] bg-white p-5 shadow-sm">
               <PanelHeader
                 title="Hospital Vaccine Orders"
-                description="Approve or decline hospital requests using AI risk flags and sentiment scores."
+                description="Allocate an existing released batch and mapped distributor. Forecast and sentiment are advisory only."
                 loading={loading.orders}
                 onRefresh={() => loadOrders()}
               />
@@ -757,7 +770,7 @@ const AdminDashboard = () => {
                   <div
                     key={order._id}
                     className={`rounded-xl border px-4 py-4 ${
-                      isActiveBatch(order.auditBatchId, selectedAuditBatchId)
+                      isActiveBatch(order.allocatedBatchId || order.auditBatchId, selectedAuditBatchId)
                         ? "border-[#2f8ae0] bg-[#eef6ff] ring-1 ring-[#bfdbfe]"
                         : "border-[#edf2f8] bg-white"
                     }`}
@@ -767,7 +780,7 @@ const AdminDashboard = () => {
                         <div className="flex flex-wrap items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => focusAuditBatch(order.auditBatchId)}
+                            onClick={() => focusAuditBatch(order.allocatedBatchId || order.auditBatchId)}
                             className="font-semibold text-[#42566f] hover:text-[#2f8ae0]"
                           >
                             {order.orderId}
@@ -794,6 +807,9 @@ const AdminDashboard = () => {
                         ) : null}
                       </div>
                       <div className="w-full max-w-[360px] space-y-2">
+                        <OrderAllocationFields order={order} options={allocationOptions} distributors={distributorOptions}
+                          value={allocations[order.orderId] || { batchId: order.allocatedBatchId, distributor: order.distributor }}
+                          onChange={value => setAllocations(prev => ({ ...prev, [order.orderId]: value }))} />
                         <textarea
                           rows={2}
                           value={decisionNotes[order.orderId] || ""}
@@ -807,7 +823,7 @@ const AdminDashboard = () => {
                           <button
                             type="button"
                             onClick={() => reviewOrderDecision(order.orderId, "Approve")}
-                            disabled={order.status !== "Pending"}
+                            disabled={order.status !== "Pending" || Boolean(reviewingOrder) || !allocations[order.orderId]?.batchId || !allocations[order.orderId]?.distributor}
                             className="flex-1 rounded-xl bg-[#2ea67f] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             Approve
@@ -815,7 +831,7 @@ const AdminDashboard = () => {
                           <button
                             type="button"
                             onClick={() => reviewOrderDecision(order.orderId, "Decline")}
-                            disabled={order.status !== "Pending"}
+                            disabled={order.status !== "Pending" || Boolean(reviewingOrder)}
                             className="flex-1 rounded-xl bg-[#e56b6b] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             Decline

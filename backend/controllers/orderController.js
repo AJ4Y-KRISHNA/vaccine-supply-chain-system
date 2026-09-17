@@ -1,13 +1,11 @@
 const Order = require("../models/Order");
 const Notification = require("../models/Notification");
-const Batch = require("../models/Batch");
-const Shipment = require("../models/Shipment");
+const User = require("../models/user");
+const { randomUUID } = require("crypto");
+const { inventorySnapshot, isDoseCount } = require("../services/inventoryEligibility");
+const allocationService = require("../services/orderAllocationService");
 const Vaccination = require("../models/Vaccination");
 const { getForecast, getSentiment } = require("../services/aiService");
-const {
-  logLifecycleEventOnChain,
-  extractHash,
-} = require("../services/blockchainService");
 
 function safeNumber(value, fallback = 0) {
   const parsed = Number(value);
@@ -50,13 +48,13 @@ exports.createHospitalOrder = async (req, res) => {
 
     const normalizedHospital = hospital || centerId || "Healthcare Center";
     const normalizedRegion = region || normalizedHospital;
-    const orderId = `ORD-${Date.now()}`;
+    if (!isDoseCount(requestedDoses) || requestedDoses === 0) return res.status(400).json({ error: "Requested doses must be a positive whole number" });
+    const orderId = `ORD-${randomUUID()}`;
     const auditBatchId = buildAuditBatchId(orderId);
 
-    const availableStock = await Batch.aggregate([
-      { $match: { vaccineType } },
-      { $group: { _id: null, total: { $sum: "$quantity" } } },
-    ]).then((rows) => safeNumber(rows[0]?.total));
+    const availableStock = (await inventorySnapshot())
+      .filter(batch => batch.vaccineType === vaccineType && batch.eligible)
+      .reduce((sum, batch) => sum + batch.remainingDoses, 0);
 
     const vaccinationHistory = await Vaccination.find({
       $or: [{ hospital: normalizedHospital }, { centerId: centerId || normalizedHospital }],
@@ -173,8 +171,12 @@ exports.getHospitalOrders = async (req, res) => {
 
 exports.getAdminOrders = async (_req, res) => {
   try {
-    const pendingOrders = await Order.find().sort({ createdAt: -1 }).lean();
-    res.json({ orders: pendingOrders });
+    const [pendingOrders, allocationOptions, users] = await Promise.all([
+      Order.find().sort({ createdAt: -1 }).lean(), inventorySnapshot(),
+      User.find({ role: "distributor" }).select("email distributor").lean(),
+    ]);
+    res.json({ orders: pendingOrders, allocationOptions,
+      distributors: [...new Set(users.map(user => user.distributor || user.email).filter(Boolean))] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -182,113 +184,10 @@ exports.getAdminOrders = async (_req, res) => {
 
 exports.reviewOrder = async (req, res) => {
   try {
-    const { orderId } = req.params;
-    const { decision, note = "", distributor = "Primary Distributor" } = req.body;
-
-    const order = await Order.findOne({ orderId });
-    if (!order) {
-      return res.status(404).json({ error: "Order not found" });
-    }
-
-    const normalizedDecision = String(decision || "").toLowerCase();
-    if (!["approve", "decline"].includes(normalizedDecision)) {
-      return res.status(400).json({ error: "Decision must be Approve or Decline" });
-    }
-
-    order.reviewedAt = new Date();
-    order.reviewedBy = req.user?.id || "admin";
-    order.adminDecisionNote = note;
-
-    if (normalizedDecision === "approve") {
-      const lifecycleReceipt = await logLifecycleEventOnChain({
-        batchId: order.auditBatchId,
-        actorRole: "Admin",
-        action: "Approve Vaccine Order",
-        location: order.region || order.hospital,
-        details: `Order ${order.orderId} approved`,
-        quantity: order.requestedDoses,
-      });
-
-      const txHash = extractHash(lifecycleReceipt);
-      order.status = "Approved";
-      order.blockchainStatus = txHash ? "Approved On-Chain" : "Approved";
-      order.approvalTxHash = txHash;
-      order.distributorVisible = true;
-      await order.save();
-
-      await Shipment.create({
-        shipmentId: `SHIP-${order.orderId}`,
-        batchId: order.auditBatchId,
-        vaccineType: order.vaccineType,
-        quantity: order.requestedDoses,
-        source: "Admin Allocation Queue",
-        distributor,
-        destination: order.hospital,
-        status: "New Shipment Required",
-        txHash,
-        statusHistory: [
-          {
-            status: "New Shipment Required",
-            timestamp: new Date(),
-            txHash,
-          },
-        ],
-      });
-
-      await createNotification({
-        recipientRole: "healthcare",
-        recipientRef: order.hospital,
-        orderId: order.orderId,
-        auditBatchId: order.auditBatchId,
-        title: "Order Approved",
-        message: `Order ${order.orderId} is approved and moving to distribution.`,
-        type: "success",
-        metadata: {
-          txHash,
-          status: order.status,
-        },
-      });
-
-      await createNotification({
-        recipientRole: "distributor",
-        recipientRef: distributor,
-        orderId: order.orderId,
-        auditBatchId: order.auditBatchId,
-        title: "New Shipment Required",
-        message: `Approved order ${order.orderId} requires shipment to ${order.hospital}.`,
-        type: "action",
-        metadata: {
-          hospital: order.hospital,
-          region: order.region,
-          vaccineType: order.vaccineType,
-          requestedDoses: order.requestedDoses,
-          txHash,
-        },
-      });
-    } else {
-      order.status = "Declined";
-      order.blockchainStatus = "Declined";
-      order.distributorVisible = false;
-      await order.save();
-
-      await createNotification({
-        recipientRole: "healthcare",
-        recipientRef: order.hospital,
-        orderId: order.orderId,
-        auditBatchId: order.auditBatchId,
-        title: "Order Declined",
-        message: `Order ${order.orderId} was declined. ${note || "Please review admin feedback."}`,
-        type: "error",
-        metadata: {
-          status: order.status,
-          note,
-        },
-      });
-    }
-
+    const order = await allocationService.reviewOrder({ ...req.body, orderId: req.params.orderId, actorId: req.user.id });
     res.json(order);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message, code: err.code });
   }
 };
 
