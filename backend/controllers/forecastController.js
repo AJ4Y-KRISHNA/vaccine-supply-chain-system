@@ -1,18 +1,18 @@
-const axios = require("axios");
+const { getForecast } = require("../services/aiService");
 
 exports.getForecast = async (req, res) => {
 
  try {
 
-const response = await axios.post("http://127.0.0.1:8000/forecast/forecast", {
+const response = await getForecast({
     vaccination_data: req.body?.vaccination_data,
     source_csv: req.body?.source_csv,
     months: req.body?.months || 12
 });
 
   res.json({
-   message: "AI demand forecast generated",
-   forecast: response.data
+   message: "Advisory demand baseline generated; inspect provenance and backtest limits",
+   forecast: response
   });
 
  } catch (error) {

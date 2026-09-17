@@ -1,17 +1,14 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
-from forecasting.cnn_lstm_model import VaccineDemandForecast
-from ingestion.data_loader import load_demand_series
+from forecasting.baselines import forecast
+from ingestion.demand_dataset import load_dataset
 
 router = APIRouter()
 
-model = VaccineDemandForecast()
-
 async def get_forecast_internal(vaccination_data: List[float]):
-    model.train(vaccination_data)
-    prediction = model.predict(vaccination_data)
-    return {"demand": prediction}
+    result = forecast(vaccination_data)
+    return {"demand": result["predicted_demand"], **result}
 
 # Request Schema
 class ForecastRequest(BaseModel):
@@ -23,14 +20,9 @@ class ForecastRequest(BaseModel):
 @router.post("/forecast")
 async def forecast_demand(data: ForecastRequest):
     try:
-        series = data.vaccination_data or load_demand_series(
-            source_path=data.source_csv,
-            n_months=data.months or 12,
-        )
-        res = await get_forecast_internal(series)
-        return {
-            "predicted_demand": res["demand"],
-            "series_used": series[-10:],  # return tail for debugging
-        }
+        if data.vaccination_data is not None:
+            return forecast(data.vaccination_data)
+        series, provenance = load_dataset(data.source_csv, data.months or 12)
+        return forecast(series, provenance)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
