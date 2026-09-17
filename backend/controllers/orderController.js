@@ -152,11 +152,12 @@ exports.getHospitalOrders = async (req, res) => {
           };
 
     const [orders, notifications] = await Promise.all([
-      Order.find(hospitalFilter).sort({ createdAt: -1 }).lean(),
+      Order.find({ $and: [req.scope.order, hospitalFilter] }).sort({ createdAt: -1 }).lean(),
       Notification.find({
         alertId: { $exists: false }, // Targeted cold-chain records use the identity-scoped alerts API.
         recipientRole: role === "admin" ? "healthcare" : role || "healthcare",
         ...(hospitalName ? { recipientRef: hospitalName } : {}),
+        ...(role === "admin" ? {} : { recipientRef: { $in: require("../middleware/identityScope").identityPatterns(req.user) } }),
       })
         .sort({ createdAt: -1 })
         .limit(15)
@@ -194,8 +195,9 @@ exports.reviewOrder = async (req, res) => {
 exports.getDistributorOrders = async (_req, res) => {
   try {
     const [orders, notifications] = await Promise.all([
-      Order.find({ status: "Approved", distributorVisible: true }).sort({ reviewedAt: -1 }).lean(),
-      Notification.find({ recipientRole: "distributor", alertId: { $exists: false } }).sort({ createdAt: -1 }).limit(15).lean(),
+      Order.find({ $and: [_req.scope.order, { status: "Approved", distributorVisible: true }] }).sort({ reviewedAt: -1 }).lean(),
+      Notification.find({ recipientRole: "distributor", alertId: { $exists: false },
+        ...(_req.user.role === "admin" ? {} : { recipientRef: { $in: require("../middleware/identityScope").identityPatterns(_req.user) } }) }).sort({ createdAt: -1 }).limit(15).lean(),
     ]);
 
     res.json({ orders, notifications });

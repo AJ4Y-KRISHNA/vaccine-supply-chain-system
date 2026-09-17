@@ -26,4 +26,5 @@ const TemperatureLogSchema = new mongoose.Schema({
   },
 });
 
+require("./demoFields")(TemperatureLogSchema);
 module.exports = mongoose.model("TemperatureLog", TemperatureLogSchema);

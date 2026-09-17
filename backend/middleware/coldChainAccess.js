@@ -1,22 +1,11 @@
-const jwt = require("jsonwebtoken");
-const User = require("../models/user");
+const { authenticate: requireIdentity } = require("./auth");
+const { identityKeys, identityPatterns, ownsIdentity } = require("./identityScope");
 const Batch = require("../models/Batch");
 const Shipment = require("../models/Shipment");
 const Alert = require("../models/TemperatureAlert");
 const { withBatchLock } = require("../services/coldChainLock");
 // Safety actions always require a signed identity, including when AUTH_OPTIONAL
 // is enabled elsewhere. Roles/capabilities come from the current database record.
-async function requireIdentity(req, res, next) {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) return res.status(401).json({ error: "Authentication required" });
-  try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET || "dev-secret");
-    const user = await User.findById(payload.id).lean();
-    if (!user) return res.status(401).json({ error: "Account not found" });
-    req.user = { ...user, id: String(user._id), role: String(user.role).toLowerCase() };
-    next();
-  } catch (_) { res.status(401).json({ error: "Invalid or expired credentials" }); }
-}
 
 function protectOperation(roles, controller, { allowNewBatch = false, newBatchOnly = false } = {}) {
   return async (req, res) => {
@@ -25,7 +14,7 @@ function protectOperation(roles, controller, { allowNewBatch = false, newBatchOn
       // Do not permit callers to set policy, quarantine or ownership bypass fields
       // via older controllers that spread req.body into database documents.
       for (const key of Object.keys(req.body || {})) {
-        if (/^(coldChain|temperaturePolicy|canReviewColdChain)/i.test(key)) return res.status(400).json({ error: "Protected cold-chain fields cannot be supplied here" });
+        if (/^(coldChain|temperaturePolicy|canReviewColdChain|isDemo|demoProvenance|organizationAliases|tokenVersion|disabled)/i.test(key) || ["productionApproved", "labApproved", "releaseVisibleToExternal", "releaseApprovedAt"].includes(key)) return res.status(400).json({ error: "Protected fields cannot be supplied here" });
       }
       req.body = req.body || {};
       const shipmentId = req.params.shipmentId || req.body.shipmentId;
@@ -45,8 +34,27 @@ function protectOperation(roles, controller, { allowNewBatch = false, newBatchOn
         if (batch?.coldChainHoldAlertIds?.length || heldShipment || heldAlert) return res.status(409).json({ error: "Quarantined—pending quality review", code: "COLD_CHAIN_HOLD" });
         if (batch?.coldChainPolicyId && (req.body.vaccineType && req.body.vaccineType !== batch.vaccineType || req.body.manufacturer && req.body.manufacturer !== batch.manufacturer)) return res.status(409).json({ error: "An approved policy is bound to this batch's vaccine and manufacturer; create a separate batch for a different product/owner" });
         if (req.user.role === "manufacturer" && batch) {
-          const keys = [req.user.email, req.user.manufacturer].filter(Boolean).map(v => v.trim().toLowerCase());
+          const keys = identityKeys(req.user);
           if (!keys.includes(String(batch.manufacturer || "").trim().toLowerCase())) return res.status(403).json({ error: "Batch belongs to a different manufacturer" });
+        }
+        if (req.user.role === "manufacturer") {
+          if (req.body.manufacturer && !ownsIdentity(req.user, req.body.manufacturer)) return res.status(403).json({ error: "Manufacturer identity cannot be overridden" });
+          if (!batch) req.body.manufacturer = req.user.manufacturer || req.user.email;
+        }
+        if (["distributor", "healthcare"].includes(req.user.role)) {
+          const field = req.user.role === "distributor" ? "distributor" : "destination";
+          const associated = shipment || await Shipment.findOne({ batchId, [field]: { $in: identityPatterns(req.user) } }).lean();
+          const newShipment = req.user.role === "distributor" && !shipment && !req.params.shipmentId && req.method === "POST";
+          if (shipment && !ownsIdentity(req.user, shipment[field]) || !associated && !newShipment) return res.status(403).json({ error: "Shipment is not assigned to this organization" });
+          if (newShipment && !batch?.releaseVisibleToExternal) return res.status(409).json({ error: "Batch is not released for shipment" });
+          const bodyFields = req.user.role === "healthcare" ? ["hospital", "centerId"] : ["distributor"];
+          for (const field of bodyFields) {
+            if (req.body[field] && !ownsIdentity(req.user, req.body[field])) return res.status(403).json({ error: "Organization identity cannot be overridden" });
+            if (!req.body[field]) req.body[field] = req.user[req.user.role === "healthcare" ? "hospital" : "distributor"] || req.user.email;
+          }
+          if (shipment && req.body.destination && req.body.destination !== shipment.destination) return res.status(403).json({ error: "Reassignment requires an admin" });
+          if (shipment && req.body.quantity !== undefined && req.body.quantity !== shipment.quantity) return res.status(403).json({ error: "Quantity amendment requires an admin" });
+          if (req.user.role === "healthcare") req.body.confirmedBy = req.user.id;
         }
         if (!req.body.batchId) req.body.batchId = batchId;
         return controller(req, res);
@@ -69,7 +77,7 @@ async function authorizeSimulator(req, res, next) {
     const batch = await Batch.findOne({ batchId: config.batchId }).lean();
     if (!batch) return res.status(404).json({ error: "Batch not found" });
     if (req.user.role === "manufacturer") {
-      const keys = [req.user.email, req.user.manufacturer].filter(Boolean).map(v => v.trim().toLowerCase());
+      const keys = identityKeys(req.user);
       if (!keys.includes(String(batch.manufacturer || "").trim().toLowerCase())) return res.status(403).json({ error: "Device batch belongs to another manufacturer" });
     }
     if (config.shipmentId) {

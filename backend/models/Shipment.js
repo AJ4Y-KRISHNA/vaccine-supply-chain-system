@@ -44,4 +44,5 @@ const ShipmentSchema = new mongoose.Schema({
 
 });
 
+require("./demoFields")(ShipmentSchema);
 module.exports = mongoose.model("Shipment", ShipmentSchema);

@@ -71,4 +71,5 @@ const BatchSchema = new mongoose.Schema({
   }
 });
 
+require("./demoFields")(BatchSchema);
 module.exports = mongoose.model("Batch", BatchSchema);

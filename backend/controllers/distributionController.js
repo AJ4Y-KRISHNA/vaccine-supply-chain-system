@@ -527,8 +527,8 @@ exports.confirmDeliveryReceipt = async (req, res) => {
 // Distributor monitoring snapshot without mock data
 exports.getDistributorWorkflow = async (_req, res) => {
   try {
-    const shipments = await Shipment.find().sort({ createdAt: -1 }).lean();
-    const tempLogs = await TemperatureLog.find().sort({ recordedAt: -1 }).limit(20).lean();
+    const shipments = await Shipment.find(_req.scope.shipment).sort({ createdAt: -1 }).lean();
+    const tempLogs = await TemperatureLog.find(_req.scope.telemetry).sort({ recordedAt: -1 }).limit(20).lean();
     const verified = shipments.filter((shipment) =>
       (shipment.statusHistory || []).some((entry) => entry.status === "Verified")
     );
@@ -551,7 +551,7 @@ exports.getDistributorWorkflow = async (_req, res) => {
 // GET ALL
 exports.getAllDistributions = async (req, res) => {
   try {
-    const data = await Distribution.find().sort({ timestamp: -1 });
+    const data = await Distribution.find(req.scope.distribution).sort({ timestamp: -1 });
     res.json(data);
   } catch (err) {
     res.status(500).json(err);

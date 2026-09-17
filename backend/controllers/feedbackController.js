@@ -198,7 +198,6 @@ async function buildFeedbackRecord(body, req) {
   const patientFeedbackText = normalizeText(body.patientFeedbackText);
   const region = normalizeText(body.region) || "Unknown Region";
   const submittedBy =
-    normalizeText(body.submittedBy) ||
     req.user?.email ||
     (req.user?.id ? `user-${req.user.id}` : "healthcare-operator");
   const observationDate = body.observationDate ? new Date(body.observationDate) : new Date();
@@ -267,11 +266,13 @@ exports.getHealthcareFeedback = async (req, res) => {
     const healthcareCenter = req.query.healthcareCenter ? normalizeText(req.query.healthcareCenter) : "";
     const region = req.query.region ? normalizeText(req.query.region) : "";
 
-    const records = await listFeedbackRecords({
+    let records = await listFeedbackRecords({
       ...(submittedBy ? { submittedBy } : {}),
       ...(healthcareCenter ? { healthcareCenter } : {}),
       ...(region ? { region } : {}),
     });
+    if (req.user.role !== "admin") records = records.filter(record =>
+      record.submittedBy === req.user.email || require("../middleware/identityScope").ownsIdentity(req.user, record.healthcareCenter));
 
     res.json({
       count: records.length,

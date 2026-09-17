@@ -558,11 +558,11 @@ exports.signBatchRelease = async (req, res) => {
 // List batches with reports (for Admin/Monitoring)
 exports.getBatchDetails = async (_req, res) => {
   try {
-    const rawMaterials = await RawMaterial.find().sort({ receivedAt: -1 }).lean();
-    const productions = await Production.find().sort({ producedAt: -1 }).lean();
-    const batches = await Batch.find().sort({ createdAt: -1 }).lean();
-    const reports = await BatchReport.find().sort({ createdAt: -1 }).lean();
-    const certificates = await InventoryCertificate.find().sort({ issuedAt: -1 }).lean();
+    const rawMaterials = await RawMaterial.find(_req.scope.relatedBatch).sort({ receivedAt: -1 }).lean();
+    const productions = await Production.find(_req.scope.relatedBatch).sort({ producedAt: -1 }).lean();
+    const batches = await Batch.find(_req.scope.batch).sort({ createdAt: -1 }).lean();
+    const reports = await BatchReport.find(_req.scope.relatedBatch).sort({ createdAt: -1 }).lean();
+    const certificates = await InventoryCertificate.find(_req.scope.relatedBatch).sort({ issuedAt: -1 }).lean();
     res.json({ rawMaterials, productions, batches, reports, certificates });
   } catch (err) {
     res.status(500).json({ error: err.message });

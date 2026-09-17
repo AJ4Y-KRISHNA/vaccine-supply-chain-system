@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const aiService = require("../services/aiService");
+router.use(require("../middleware/auth").authenticate, require("../middleware/auth").allowRoles());
 
 router.post("/distribution-decision", async (req, res) => {
 

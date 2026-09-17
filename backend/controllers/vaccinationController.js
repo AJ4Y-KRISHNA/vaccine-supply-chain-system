@@ -430,7 +430,7 @@ exports.createRecord = async (req, res) => {
 
 exports.getRecords = async (_req, res) => {
   try {
-    const records = await Vaccination.find().sort({ date: -1 });
+    const records = await Vaccination.find(_req.scope.vaccination).sort({ date: -1 });
     res.json(records);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -439,7 +439,7 @@ exports.getRecords = async (_req, res) => {
 
 exports.getWorkflowStatus = async (_req, res) => {
   try {
-    const records = await Vaccination.find().sort({ date: -1 }).lean();
+    const records = await Vaccination.find(_req.scope.vaccination).sort({ date: -1 }).lean();
     const requests = records.filter((item) => item.workflowStage === "1.1 Vaccine Request");
     const inventory = records.filter((item) => item.workflowStage === "1.2 Stock Management");
     const administrations = records.filter((item) => item.workflowStage === "1.3 Administer Vaccines");

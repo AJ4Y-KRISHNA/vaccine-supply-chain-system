@@ -13,6 +13,7 @@ import { ToastProvider } from "./components/Toast";
 function App() {
   return (
     <ToastProvider>
+      <div role="note" className="bg-amber-50 px-4 py-2 text-center text-xs text-amber-900">Software-only demo/test system. Synthetic records and placeholder inventory are not for clinical use.</div>
       <Router>
         <Routes>
           <Route path="/" element={<Login />} />

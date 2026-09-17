@@ -264,8 +264,8 @@ async function buildManufacturerHeatmapData(orders) {
 
 exports.getDistributorDashboard = async (_req, res) => {
   try {
-    const shipments = await Shipment.find().sort({ createdAt: -1 }).lean();
-    const temperatureLogs = await TemperatureLog.find().sort({ recordedAt: -1 }).limit(10).lean();
+    const shipments = await Shipment.find(_req.scope.shipment).sort({ createdAt: -1 }).lean();
+    const temperatureLogs = await TemperatureLog.find(_req.scope.telemetry).sort({ recordedAt: -1 }).limit(10).lean();
 
     const inTransit = shipments.filter((s) => s.status?.toLowerCase().includes("transit")).length;
     const delivered = shipments.filter((s) => {
@@ -315,12 +315,12 @@ exports.getDistributorDashboard = async (_req, res) => {
 
 exports.getManufacturerDashboard = async (_req, res) => {
   try {
-    const batches = await Batch.find().sort({ createdAt: -1 }).lean();
-    const productions = await Production.find().sort({ producedAt: -1 }).lean();
-    const rawMaterials = await RawMaterial.find().sort({ receivedAt: -1 }).lean();
-    const reports = await BatchReport.find().sort({ createdAt: -1 }).lean();
-    const certificates = await InventoryCertificate.find().sort({ issuedAt: -1 }).lean();
-    const orders = await Order.find({ status: { $in: ["Pending", "Approved"] } }).sort({ createdAt: -1 }).lean();
+    const batches = await Batch.find(_req.scope.batch).sort({ createdAt: -1 }).lean();
+    const productions = await Production.find(_req.scope.relatedBatch).sort({ producedAt: -1 }).lean();
+    const rawMaterials = await RawMaterial.find(_req.scope.relatedBatch).sort({ receivedAt: -1 }).lean();
+    const reports = await BatchReport.find(_req.scope.relatedBatch).sort({ createdAt: -1 }).lean();
+    const certificates = await InventoryCertificate.find(_req.scope.relatedBatch).sort({ issuedAt: -1 }).lean();
+    const orders = await Order.find({ $and: [_req.scope.order, { status: { $in: ["Pending", "Approved"] } }] }).sort({ createdAt: -1 }).lean();
     const heatmap = await buildManufacturerHeatmapData(orders);
 
     const totalQuantity = batches.reduce((sum, batch) => sum + (batch.quantity || 0), 0);
@@ -387,8 +387,8 @@ exports.getManufacturerDashboard = async (_req, res) => {
 
 exports.getHealthcareDashboard = async (_req, res) => {
   try {
-    const vaccinations = await Vaccination.find().sort({ date: -1 }).lean();
-    const shipments = await Shipment.find().sort({ lastUpdatedAt: -1 }).lean();
+    const vaccinations = await Vaccination.find(_req.scope.vaccination).sort({ date: -1 }).lean();
+    const shipments = await Shipment.find(_req.scope.shipment).sort({ lastUpdatedAt: -1 }).lean();
     const dailyProgress = buildSevenDaySeries(vaccinations, "date", "dosesUsed");
     const inventory = computeHealthcareInventory(vaccinations);
 

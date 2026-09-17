@@ -46,11 +46,12 @@ function Login() {
         localStorage.setItem("refreshToken", res.data.refreshToken);
       }
     } catch (err) {
-      addToast("error", "Login failed; using role-only session.");
+      addToast("error", "Login failed. Check your credentials and backend connection.");
       localStorage.removeItem("token");
       localStorage.removeItem("refreshToken");
-      localStorage.setItem("userEmail", username);
-      localStorage.setItem("role", displayRole(role));
+      localStorage.removeItem("userEmail");
+      localStorage.removeItem("role");
+      return;
     }
 
     if (role === "Admin") navigate("/admin");

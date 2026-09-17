@@ -5,8 +5,9 @@ const router = express.Router();
 const vaccinationController = require("../controllers/vaccinationController");
 const { authenticate } = require("../middleware/auth");
 const { requireIdentity, protectOperation } = require("../middleware/coldChainAccess");
+router.use(requireIdentity, require("../middleware/auth").allowRoles("healthcare"), require("../middleware/identityScope").scopeData);
 
-router.post("/request", authenticate, vaccinationController.requestVaccines);
+router.post("/request", authenticate, require("../middleware/identityScope").bindOrganization, vaccinationController.requestVaccines);
 router.post("/inventory", requireIdentity, protectOperation(["admin", "healthcare"], vaccinationController.updateInventory));
 router.post("/administer", requireIdentity, protectOperation(["admin", "healthcare"], vaccinationController.administerVaccines));
 router.post("/report", requireIdentity, protectOperation(["admin", "healthcare"], vaccinationController.recordAndReport));

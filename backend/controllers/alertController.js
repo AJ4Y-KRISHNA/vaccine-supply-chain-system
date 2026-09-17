@@ -26,7 +26,7 @@ const policySchema = Joi.object({
 const reasonSchema = Joi.object({ reason: Joi.string().trim().min(3).max(2000).required(), asOf: Joi.string().isoDate() });
 const isOperator = req => ["admin", "manufacturer"].includes(req.user.role);
 const isReviewer = req => isOperator(req) && req.user.canReviewColdChain === true;
-const keysFor = req => [...new Set([req.user.email, req.user[req.user.role === "healthcare" ? "hospital" : req.user.role]].map(normaliseKey).filter(Boolean))];
+const keysFor = req => require("../middleware/identityScope").identityKeys(req.user);
 function notificationFilter(req) {
   if (!["admin", "manufacturer", "distributor", "healthcare"].includes(req.user.role)) return null;
   return { recipientRole: req.user.role, alertId: { $exists: true },

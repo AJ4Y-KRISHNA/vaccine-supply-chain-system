@@ -5,8 +5,8 @@ Date: 2026-09-17. This tracks the ten recommendations in section 13 of the proje
 | Step | State | Evidence / remaining work |
 | --- | --- | --- |
 | 1. Checkpoint the prototype | Complete | Local branch `codex/ordered-roadmap-20260917`; checkpoint `2425396`. Existing cold-chain work retained. Environment files, dependency folders and generated artifacts excluded. Not pushed. |
-| 2. Repair batch–shipment–order relationships | New-order fix implemented; historical reconciliation awaiting project-owner input | Real batch allocation, eligible stock checks, mapped distributor selection, duplicate/concurrent approval handling, read-only audit. Historical mappings are not inferred. |
-| 3. Harden authentication and authorization | Pending | Order review/admin allocation listing now require current database admin identity as part of step 2. The broader authentication, password, secret and legacy-route work is not complete. |
+| 2. Repair batch–shipment–order relationships | Complete for user-confirmed demo data | 62 journaled operations; 13 synthetic placeholder batches; all seven integrity checks now zero; retry plans zero changes. Original values retained, no deletions or quality approvals. |
+| 3. Harden authentication and authorization | Local prototype hardening implemented | Password migration, required random secrets, no bypass/role-only login, DB-backed JWT identity, role and organization checks, scoped legacy reads, login throttling, body limits and local-only listener. 91 backend + 20 frontend tests passed at this checkpoint. Not a production security certification. |
 | 4. Simulator UI and durable operation | Pending | Existing simulator remains in-memory. |
 | 5. Operational monitoring | Pending | Autonomous missing-telemetry checks and pushed/periodic dashboard updates remain to be implemented. |
 | 6. Secure local blockchain integration | Pending | Contract/oracle access-control fixes, contract tests and cold-chain hash anchoring remain. |
@@ -28,7 +28,7 @@ Date: 2026-09-17. This tracks the ten recommendations in section 13 of the proje
 - Existing chain logging is retained, now keyed to the actual batch. A mock or unconfirmed receipt is not labeled as confirmed on-chain. An RPC exception leaves the order pending. No live chain call was performed during tests.
 - New hospital orders reject zero, negative, fractional or nonnumeric dose requests; UUID-based order identifiers avoid millisecond collisions. Advisory available stock excludes ineligible/already-assigned doses.
 
-## Read-only audit and current blocker
+## Read-only audit and resolved data-classification decision
 
 From `backend`, run:
 
@@ -38,7 +38,7 @@ npm run audit:integrity
 
 The script uses the configured `MONGO_URI`, disables model auto-creation/index writes, selects only fields needed for reconciliation, and prints a report. It does not migrate, delete, seed, remap, or grant privileges.
 
-Current local findings:
+Original local findings before user-confirmed demo reconciliation:
 
 - 13 orphan shipments, including 5 with missing product/quantity information.
 - 7 telemetry records referencing absent batches.
@@ -46,9 +46,9 @@ Current local findings:
 - 10 batches without a mapped manufacturer account: 9 labeled `Unknown`, plus one labeled `North Plant`.
 - No duplicate batch or shipment identifiers found in the audited records.
 
-These findings mean existing ambiguous inventory is intentionally not eligible for new approval. The user must confirm whether it is historical demo data or records requiring factual reconciliation. For retained operational records, supply an explicit mapping using `RECONCILIATION_INPUT.example.json` as a guide. Unknown values must remain unresolved; the script does not fill them in.
+The project owner subsequently confirmed **all old records are demo/test data**. The local-only `reconcileDemoData.js --execute --confirmed-demo` created 13 explicitly synthetic, unreleased placeholder batches using the previously referenced batch IDs. Missing product/quantity fields are labeled placeholders (zero doses); they are not reconstructed clinical facts. Existing batches are mapped to the demo manufacturer. Explicit demo organization aliases preserve original distributor/destination/hospital strings while providing scoped account access. Eight approved demo orders now have batch/shipment links. Original changed field values are retained in 62 append-only `DemoReconciliation` journal entries.
 
-No historical application records were changed in this implementation. No passwords, account ownership, product policies, or existing quarantine/review records were changed. Later roadmap stages remain pending while this ordered data-reconciliation decision is outstanding.
+The fresh audit reports zero orphan shipments, unknown batch owners, orphan/conflicting telemetry, duplicate identifiers or unallocated approved orders. A second reconciliation run plans zero operations. No existing records were deleted; no policy, release approval, quarantine hold, temperature reading or timestamp was changed by reconciliation. Separately, step 3 hashed four existing demo passwords without changing their login values and invalidated prior sessions. Generated local secrets are in ignored `backend/.env`, never committed. See `SECURITY_HARDENING.md`.
 
 ## Boundaries
 
