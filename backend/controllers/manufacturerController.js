@@ -216,7 +216,8 @@ exports.createBatch = async (req, res) => {
         batchId,
         vaccineType,
         quantity,
-        manufacturer: req.body.manufacturer || "Manufacturer",
+          manufacturer: req.body.manufacturer || "Manufacturer",
+          expiresAt: req.body.expiresAt,
         txHash: "",
         status: "Awaiting Multi-Sign Release",
         releaseStage: "Awaiting Production Sign-Off",
@@ -395,6 +396,7 @@ exports.runManufacturerWorkflow = async (req, res) => {
         quantity,
         manufacturer,
         status: "Batch Created",
+        expiresAt: req.body.expiresAt,
         productionStatus: "Produced",
       });
     }

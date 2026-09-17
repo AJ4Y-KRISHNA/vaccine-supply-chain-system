@@ -195,6 +195,7 @@ const createBatch = async (req, res) => {
       vaccineType,
       quantity,
       manufacturer,
+      expiresAt: req.body.expiresAt,
       txHash
     });
 

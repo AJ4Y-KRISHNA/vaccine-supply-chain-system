@@ -36,6 +36,7 @@ import { useToast } from "../components/Toast";
 import SentimentFeedbackPanel from "../components/Admin/SentimentFeedbackPanel";
 import TemperatureAlertPanel from "../components/TemperatureAlertPanel";
 import SimulatorPanel from "../components/SimulatorPanel";
+import SupplyPlannerPanel from "../components/Admin/SupplyPlannerPanel";
 import OrderAllocationFields from "../components/Admin/OrderAllocationFields";
 import {
   fetchAdminMonitoring,
@@ -1023,7 +1024,8 @@ const AdminDashboard = () => {
             </div>
 
             <TemperatureAlertPanel role="admin" />
-            <SimulatorPanel />
+      <SimulatorPanel />
+      <SupplyPlannerPanel />
 
             <div className="mt-4" id="admin-blockchain-audit">
               <BlockchainLog

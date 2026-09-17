@@ -22,8 +22,9 @@ function assessBatch(batch, shipments, alerts, manufacturers) {
   const remainingDoses = isDoseCount(batch.quantity) ? Math.max(0, batch.quantity - assignedDoses) : 0;
   if (assignedDoses > batch.quantity) reasons.push("OVERALLOCATED_STOCK");
   if (!remainingDoses) reasons.push("NO_AVAILABLE_STOCK");
+  if (batch.expiresAt && +new Date(batch.expiresAt) <= Date.now()) reasons.push("EXPIRED");
   return { batchId: batch.batchId, vaccineType: batch.vaccineType, manufacturer: batch.manufacturer,
-    quantity: batch.quantity, assignedDoses, remainingDoses, eligible: reasons.length === 0, reasons };
+    quantity: batch.quantity, expiresAt: batch.expiresAt, assignedDoses, remainingDoses, eligible: reasons.length === 0, reasons };
 }
 
 async function inventorySnapshot() {

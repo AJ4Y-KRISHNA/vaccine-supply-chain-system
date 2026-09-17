@@ -5,6 +5,7 @@ const BatchSchema = new mongoose.Schema({
   vaccineType: String,
   quantity: Number,
   manufacturer: String,
+  expiresAt: Date,
   coldChainPolicyId: { type: mongoose.Schema.Types.ObjectId, ref: "ColdChainPolicy" },
   coldChainHoldAlertIds: { type: [String], default: undefined },
   coldChainStatus: String,

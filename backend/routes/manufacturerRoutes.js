@@ -21,14 +21,14 @@ router.post("/raw-materials", authenticate, bindOrganization, protectOperation([
 router.post("/produce", authenticate, bindOrganization, protectOperation(["admin", "manufacturer"], produceVaccine, { allowNewBatch: true }));
 
 // 1.3 Create Vaccine Batch (DB + blockchain)
-router.post("/batch", requireIdentity, protectOperation(["admin", "manufacturer"], createBatch, { allowNewBatch: true }));
+router.post("/batch", requireIdentity, protectOperation(["admin", "manufacturer"], createBatch, { allowNewBatch: true, newBatchOnly: true }));
 
 // 1.4 Create Batch Report
 router.post("/batch/report", requireIdentity, protectOperation(["admin", "manufacturer"], createBatchReport));
 router.post("/batch/:batchId/sign-release", requireIdentity, protectOperation(["admin", "manufacturer"], signBatchRelease));
 
 // Full DFD workflow
-router.post("/workflow", requireIdentity, protectOperation(["admin", "manufacturer"], runManufacturerWorkflow, { allowNewBatch: true }));
+router.post("/workflow", requireIdentity, protectOperation(["admin", "manufacturer"], runManufacturerWorkflow, { allowNewBatch: true, newBatchOnly: true }));
 
 // Monitoring endpoint
 router.get("/batches", authenticate, getBatchDetails);

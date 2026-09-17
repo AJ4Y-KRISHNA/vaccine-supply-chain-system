@@ -21,7 +21,7 @@ router.use(requireIdentity, allowRoles("distributor", "healthcare"), scopeData);
 router.post("/admin/distribute", requireIdentity, protectOperation(["admin"], createDistribution));
 
 // Distributor DFD flow
-router.post("/distributor/receive-batch", requireIdentity, protectOperation(["admin", "distributor"], receiveBatchInfo));
+router.post("/distributor/receive-batch", requireIdentity, protectOperation(["admin", "distributor"], receiveBatchInfo, { createsShipment: true }));
 router.patch("/distributor/verify/:shipmentId", requireIdentity, protectOperation(["admin", "distributor"], verifyVaccineDetails));
 router.patch("/distributor/status/:shipmentId", requireIdentity, protectOperation(["admin", "distributor"], updateDeliveryStatus));
 router.patch("/distributor/supply/:shipmentId", requireIdentity, protectOperation(["admin", "distributor"], supplyVaccinationCenter));

@@ -149,7 +149,7 @@ test("conflicting route/body identifiers cannot guard a different batch from the
   expect((await Batch.findOne({ batchId: f.batchId })).productionApproved).toBe(false);
 });
 test("unheld operations still reach the existing implementation", async () => {
-  const result = await request(app).post("/api/shipments/create").set(bearer(admin)).send({ shipmentId: `${f.shipmentId}-new`, batchId: f.batchId, status: "Created" });
+  const result = await request(app).post("/api/shipments/create").set(bearer(admin)).send({ shipmentId: `${f.shipmentId}-new`, batchId: f.batchId, quantity: 0, status: "Created" });
   expect(result.status).toBe(200);
   expect(result.body.batchId).toBe(f.batchId);
   expect(await Shipment.countDocuments({ batchId: f.batchId })).toBe(2);

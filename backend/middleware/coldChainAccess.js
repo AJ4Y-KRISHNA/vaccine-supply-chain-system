@@ -7,7 +7,7 @@ const { withBatchLock } = require("../services/coldChainLock");
 // Safety actions always require a signed identity, including when AUTH_OPTIONAL
 // is enabled elsewhere. Roles/capabilities come from the current database record.
 
-function protectOperation(roles, controller, { allowNewBatch = false, newBatchOnly = false } = {}) {
+function protectOperation(roles, controller, { allowNewBatch = false, newBatchOnly = false, createsShipment = false } = {}) {
   return async (req, res) => {
     if (!roles.includes(req.user?.role)) return res.status(403).json({ error: "Role cannot perform this operation" });
     try {
@@ -28,10 +28,20 @@ function protectOperation(roles, controller, { allowNewBatch = false, newBatchOn
       return await withBatchLock(batchId, async () => {
         const batch = await Batch.findOne({ batchId }).lean();
         if (!batch && !allowNewBatch) return res.status(404).json({ error: "Batch not found" });
-        if (batch && newBatchOnly) return res.status(409).json({ error: "Batch ID already exists" });
         const heldShipment = await Shipment.exists({ batchId, "coldChainHoldAlertIds.0": { $exists: true } });
         const heldAlert = await Alert.exists({ batchId, requiresQualityReview: true });
         if (batch?.coldChainHoldAlertIds?.length || heldShipment || heldAlert) return res.status(409).json({ error: "Quarantined—pending quality review", code: "COLD_CHAIN_HOLD" });
+        if (batch && newBatchOnly) return res.status(409).json({ error: "Batch ID already exists" });
+        if (batch?.expiresAt && +new Date(batch.expiresAt) <= Date.now()) return res.status(409).json({ error: "Batch has expired", code: "BATCH_EXPIRED" });
+        if (createsShipment) {
+          if (shipment) return res.status(409).json({ error: "Shipment identifier already exists" });
+          const { inventorySnapshot, isDoseCount } = require("../services/inventoryEligibility");
+          if (!isDoseCount(req.body.quantity)) return res.status(400).json({ error: "Shipment quantity must be a nonnegative whole number" });
+          if (req.body.quantity > 0) {
+            const item = (await inventorySnapshot()).find(item => item.batchId === batchId);
+            if (!item?.eligible || item.remainingDoses < req.body.quantity) return res.status(409).json({ error: "Insufficient eligible unassigned batch stock" });
+          }
+        }
         if (batch?.coldChainPolicyId && (req.body.vaccineType && req.body.vaccineType !== batch.vaccineType || req.body.manufacturer && req.body.manufacturer !== batch.manufacturer)) return res.status(409).json({ error: "An approved policy is bound to this batch's vaccine and manufacturer; create a separate batch for a different product/owner" });
         if (req.user.role === "manufacturer" && batch) {
           const keys = identityKeys(req.user);

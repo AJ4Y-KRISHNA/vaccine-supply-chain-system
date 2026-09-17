@@ -1,0 +1,13 @@
+# Constrained, advisory supply planning
+
+Admin dashboard → Constrained supply planning. Refresh pending orders, select them, enter each hospital's **shared free** capacity, transit hours, total transport capacity (all in dose units) and an explicit planning timestamp. Generate a plan. Existing Batch data needs an explicitly entered `expiresAt`; unknown legacy expiry is excluded, never guessed.
+
+`GET /api/admin/supply-plan/inputs` returns current pending orders and conservative stock. `POST /api/admin/supply-plan` accepts `{asOf, transportCapacityDoses, destinations:[{orderId, freeCapacityDoses, transitHours}]}`. Inputs and result are retained in application-append-only SupplyPlan records. Only admins have access.
+
+The deterministic priority-then-FEFO heuristic selects matching vaccine products, released/unheld stock with valid ownership and quantity records, and expiry strictly after estimated arrival. It respects order demand, shared batch stock, shared hospital free capacity and aggregate transport capacity. It reports unfilled demand and excluded batches with reasons. It is **not** a globally optimal route/vehicle/thermal-capacity solver. Operator-entered constraints are unverified scenario inputs, not physical measurements. Pending orders are the demand signal; historical AI/certificate numbers are not silently promoted to validated demand.
+
+This preview does not reserve stock, approve orders or dispatch. Existing explicit single-batch order approval rechecks stock and holds at execution. Multi-batch recommendations are informational until a separate explicit split-order workflow is added; do not overwrite or double-count existing orders. No automatic procurement or administration is implemented.
+
+Direct shipment creation now requires an explicit nonnegative whole dose quantity, unique shipment ID, and sufficient released/unheld stock for nonzero shipments. These paths share the same per-batch queue as order allocation and quality holds. Known expired stock is blocked from operational mutations. Legacy unknown expiry remains visible but cannot enter the planner. Registered batches cannot be silently recreated through manufacturer batch/workflow endpoints.
+
+Verification includes deterministic FEFO, held/unreleased/expired/unknown-expiry/product exclusions, arrival shelf-life, shared hospital capacity, invalid constraints, and 100 repeatable varied-capacity trials proving no quantity/transport/destination limit is exceeded. Frontend test verifies explicit inputs and advisory output. This is a single-process prototype, not a distributed inventory ledger or cold-storage engineering assessment.
