@@ -5,6 +5,16 @@ const BatchSchema = new mongoose.Schema({
   vaccineType: String,
   quantity: Number,
   manufacturer: String,
+  coldChainPolicyId: { type: mongoose.Schema.Types.ObjectId, ref: "ColdChainPolicy" },
+  coldChainHoldAlertIds: { type: [String], default: undefined },
+  coldChainStatus: String,
+  // Legacy draft limits are retained for compatibility, but evaluation requires
+  // an explicitly approved, versioned coldChainPolicyId.
+  temperaturePolicy: {
+    minimumTemperature: Number,
+    maximumTemperature: Number,
+    warningDeviationCelsius: Number,
+  },
   txHash: String,
   baselineDemandForecast: {
     type: Number,

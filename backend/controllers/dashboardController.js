@@ -346,6 +346,7 @@ exports.getManufacturerDashboard = async (_req, res) => {
         vaccineType: batch.vaccineType,
         quantity: batch.quantity,
         status: batch.status || "Manufactured",
+        coldChainStatus: batch.coldChainStatus || "",
         txHash: batch.txHash,
         baselineDemandForecast: batch.baselineDemandForecast || 0,
         certificateMinted: Boolean(batch.certificateMinted),
@@ -436,6 +437,7 @@ exports.getHealthcareDashboard = async (_req, res) => {
           quantity: shipment.quantity || 0,
           destination: shipment.destination || "Vaccination Center",
           status: shipment.status || "Pending",
+          coldChainStatus: shipment.coldChainStatus || "",
           txHash: shipment.txHash || "",
         })),
     });

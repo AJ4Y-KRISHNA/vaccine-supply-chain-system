@@ -8,6 +8,16 @@ const notificationSchema = new mongoose.Schema(
       index: true,
     },
     recipientRef: String,
+    recipientRefKey: String,
+    alertId: {
+      type: String,
+      index: true,
+    },
+    deduplicationKey: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
     orderId: String,
     auditBatchId: String,
     title: String,

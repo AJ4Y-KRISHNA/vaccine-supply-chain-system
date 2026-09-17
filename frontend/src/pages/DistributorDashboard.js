@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import TemperatureAlertPanel from "../components/TemperatureAlertPanel";
 import { Link } from "react-router-dom";
 import {
   Truck, CheckSquare, Search, Bell, User, ChevronDown,
@@ -133,7 +134,7 @@ function DistributorDashboard() {
           type: shipment.vaccineType || "Mixed",
           qty: shipment.quantity ? shipment.quantity.toLocaleString() : "--",
           dest: shipment.destination || "N/A",
-          status: shipment.status || "Pending",
+          status: shipment.coldChainStatus || shipment.status || "Pending",
           txHash: shipment.txHash || "pending",
           statusColor:
             (shipment.status || "").toLowerCase().includes("transit")
@@ -548,6 +549,7 @@ function DistributorDashboard() {
             </div>
           </div>
 
+          <TemperatureAlertPanel role="distributor" />
           <div className="mt-6">
             <BlockchainLog
               title="Distributor Blockchain Audit"

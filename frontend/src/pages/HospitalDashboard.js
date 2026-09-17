@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import TemperatureAlertPanel from "../components/TemperatureAlertPanel";
 import { Link } from "react-router-dom";
 import {
   Activity,
@@ -524,7 +525,7 @@ function HospitalDashboard() {
                         </p>
                       </div>
                       <span className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${orderTone(shipment.status)}`}>
-                        {shipment.status}
+                        {shipment.coldChainStatus || shipment.status}
                       </span>
                     </div>
                     <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
@@ -642,6 +643,7 @@ function HospitalDashboard() {
               </div>
             </div>
 
+            <TemperatureAlertPanel role="healthcare" />
             <div className="mt-5">
               <BlockchainLog
                 title="Vaccination Center Blockchain Audit"

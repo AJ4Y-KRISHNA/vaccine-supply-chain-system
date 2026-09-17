@@ -19,6 +19,8 @@ const manufacturerRoutes = require("./routes/manufacturerRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const feedbackRoutes = require("./routes/feedbackRoutes");
+const simulatorRoutes = require("./routes/simulatorRoutes");
+const alertRoutes = require("./routes/alertRoutes");
 
 const app = express();
 
@@ -47,6 +49,8 @@ app.use("/api/shipments", shipmentRoutes);
 app.use("/api/vaccinations", vaccinationRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/temperature", temperatureRoutes);
+app.use("/api/simulator", simulatorRoutes);
+app.use("/api/alerts", alertRoutes);
 app.use("/api/manufacturer", manufacturerRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/orders", orderRoutes);

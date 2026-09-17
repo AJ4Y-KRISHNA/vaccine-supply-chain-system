@@ -19,6 +19,7 @@ import { Line } from "react-chartjs-2";
 import { fetchManufacturerDashboard, signManufacturerBatchRelease } from "../services/dashboard";
 import { useToast } from "../components/Toast";
 import BlockchainLog from "../components/BlockchainLog";
+import TemperatureAlertPanel from "../components/TemperatureAlertPanel";
 
 ChartJS.register(
   CategoryScale,
@@ -169,7 +170,8 @@ function ManufacturerDashboard() {
         id: batch.batchId,
         type: batch.vaccineType || "Mixed",
         qty: (batch.quantity || 0).toLocaleString(),
-        status: batch.status || "Pending",
+        status: batch.coldChainStatus || batch.status || "Pending",
+        coldChainStatus: batch.coldChainStatus,
         baselineDemandForecast: batch.baselineDemandForecast || 0,
         certificateMinted: Boolean(batch.certificateMinted),
         certificateId: batch.certificateId || "",
@@ -396,8 +398,8 @@ function ManufacturerDashboard() {
                           <td className="py-2.5">{batch.qty}</td>
                           <td className="py-2.5">
                             <div className="flex flex-col gap-2">
-                              <span className={`px-2.5 py-1 rounded-md text-[11px] font-semibold ${statusClass(batch.releaseStage || batch.status)}`}>
-                                {batch.releaseStage || batch.status}
+                              <span className={`px-2.5 py-1 rounded-md text-[11px] font-semibold ${statusClass(batch.coldChainStatus || batch.releaseStage || batch.status)}`}>
+                                {batch.coldChainStatus || batch.releaseStage || batch.status}
                               </span>
                               <div className="flex flex-wrap gap-2 text-[11px]">
                                 <span className={`rounded-md px-2 py-1 ${releaseChip(batch.productionApproved)}`}>
@@ -533,6 +535,8 @@ function ManufacturerDashboard() {
                 emptyMessage="Create and log a batch to see the on-chain manufacturing timeline."
               />
             </div>
+
+            <TemperatureAlertPanel role="manufacturer" />
           </div>
         </main>
       </div>

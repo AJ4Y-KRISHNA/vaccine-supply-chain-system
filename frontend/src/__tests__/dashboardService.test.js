@@ -6,7 +6,15 @@ import {
   fetchAdminDashboard,
 } from "../services/dashboard";
 
-jest.mock("axios");
+jest.mock("axios", () => {
+  const client = {
+    get: jest.fn(),
+    post: jest.fn(),
+    interceptors: { request: { use: jest.fn() } },
+  };
+  client.create = jest.fn(() => client);
+  return { __esModule: true, default: client };
+});
 
 describe("dashboard service", () => {
   afterEach(() => {

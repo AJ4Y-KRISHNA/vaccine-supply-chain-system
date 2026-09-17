@@ -3,6 +3,8 @@ const mongoose = require("mongoose");
 const ShipmentSchema = new mongoose.Schema({
   shipmentId: String,
   batchId: String,
+  coldChainHoldAlertIds: { type: [String], default: undefined },
+  coldChainStatus: String,
   vaccineType: String,
   quantity: Number,
   source: String,

@@ -34,6 +34,7 @@ import {
 import BlockchainLog from "../components/BlockchainLog";
 import { useToast } from "../components/Toast";
 import SentimentFeedbackPanel from "../components/Admin/SentimentFeedbackPanel";
+import TemperatureAlertPanel from "../components/TemperatureAlertPanel";
 import {
   fetchAdminMonitoring,
   fetchAdminOrders,
@@ -315,7 +316,7 @@ const AdminDashboard = () => {
           id: item._id || item.batchId,
           title: item.batchId || "--",
           subtitle: item.vaccineType || "Vaccine batch",
-          status: item.status || "Created",
+          status: item.coldChainStatus || item.status || "Created",
           meta: formatDateTime(item.createdAt),
           txHash: item.txHash,
         })),
@@ -326,7 +327,7 @@ const AdminDashboard = () => {
           id: item._id || item.batchId,
           title: item.batchId || "--",
           subtitle: item.destination || item.currentLocation || "Shipment route",
-          status: item.status || "Pending",
+          status: item.coldChainStatus || item.status || "Pending",
           meta: formatDateTime(item.lastUpdatedAt || item.createdAt),
           txHash: item.txHash,
         })),
@@ -1003,6 +1004,8 @@ const AdminDashboard = () => {
                 selectedAuditBatchId={selectedAuditBatchId}
               />
             </div>
+
+            <TemperatureAlertPanel role="admin" />
 
             <div className="mt-4" id="admin-blockchain-audit">
               <BlockchainLog
