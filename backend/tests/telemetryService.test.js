@@ -1,5 +1,7 @@
 jest.mock("../models/TemperatureLog", () => ({
   insertMany: jest.fn(),
+  findOneAndUpdate: jest.fn(),
+  findOne: jest.fn(),
   updateOne: jest.fn(),
 }));
 
@@ -45,26 +47,30 @@ describe("telemetry persistence", () => {
 
   test("maps and persists a simulator reading in the existing TemperatureLog collection", async () => {
     const mapped = simulationReadingToTemperatureLog(reading);
-    TemperatureLog.insertMany.mockResolvedValue([{ _id: "log-1", ...mapped }]);
+    TemperatureLog.findOneAndUpdate.mockResolvedValue({ _id: "log-1", ...mapped });
 
     const persisted = await persistSimulationReading(reading);
 
-    expect(TemperatureLog.insertMany).toHaveBeenCalledWith([
-      expect.objectContaining({
+    expect(TemperatureLog.findOneAndUpdate).toHaveBeenCalledWith(
+      { idempotencyKey: expect.stringMatching(/^v1:/) },
+      { $setOnInsert: expect.objectContaining({
         shipmentId: "SHIP-001",
         batchId: "VAC-001",
         sensorId: "IOT-001",
         deviceId: "IOT-001",
         vehicleId: "TRUCK-01",
+        sequenceNumber: 0,
         location: { lat: 9.9312, lng: 76.2673 },
         simulation: expect.objectContaining({ source: "software-iot-simulator" }),
-      }),
-    ]);
+        idempotencyKey: expect.stringMatching(/^v1:/),
+      }) },
+      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+    );
     expect(persisted._id).toBe("log-1");
   });
 
   test("marks a simulator temperature log as Alert only after backend detection", async () => {
-    TemperatureLog.insertMany.mockResolvedValue([{ _id: "log-2", ...simulationReadingToTemperatureLog(reading) }]);
+    TemperatureLog.findOneAndUpdate.mockResolvedValue({ _id: "log-2", ...simulationReadingToTemperatureLog(reading) });
     processSimulatedTemperatureReading.mockResolvedValue({
       evaluated: true,
       violationType: "HIGH_TEMPERATURE",

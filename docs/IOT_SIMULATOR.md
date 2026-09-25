@@ -17,6 +17,7 @@ Existing fields remain unchanged: `shipmentId`, `batchId`, `sensorId`, `temperat
 | Field | Meaning |
 | --- | --- |
 | `deviceId` | Virtual device identifier. `sensorId` is also set to this value for compatibility. |
+| `sequenceNumber` | Reading sequence. Simulator persistence derives this from the existing `simulation.tick`; ingestion clients may submit it directly. |
 | `vehicleId` | Virtual vehicle identifier. |
 | `humidity` | Simulated relative humidity, as a percentage. |
 | `batteryLevel` | Simulated battery percentage. |
@@ -25,13 +26,15 @@ Existing fields remain unchanged: `shipmentId`, `batchId`, `sensorId`, `temperat
 
 The existing `POST /api/temperature/ingest` request still accepts the original minimal payload; it now also accepts these telemetry fields as optional fields. Its API-key requirement and response format are unchanged.
 
+When a reading has a device or sensor ID, batch ID, valid timestamp, and non-negative integer sequence number, persistence derives a stable key from those four values. MongoDB enforces uniqueness with a sparse unique index on that key. A retry with the same identity returns the existing `TemperatureLog` instead of appending another; changing the sequence number represents a distinct reading. Simulator ticks use their existing tick number, without changing the simulator seed or clock behavior. Legacy ingestion payloads without a complete identity remain accepted and do not receive this deduplication guarantee.
+
 ## Deterministic behavior
 
 Pass the same `seed`, `startTime`, tick interval, route, temperature range, and scenario to receive the same sequence of readings. The simulation clock starts at `startTime`; the first tick is timestamped with that value, and each later tick advances exactly `tickIntervalMs`. The default clock start is `2026-01-01T00:00:00.000Z`, rather than the host clock, so default simulations are repeatable too.
 
-`reset` stops the scheduler, restores the configured clock start and battery level, reinitializes the seeded generator, and removes the last runtime reading. It never deletes persisted logs, alerts, telemetry checkpoints, or quarantine holds. Replayed historical readings are stored but skipped by the alert engine as stale/duplicate. Use a separate demo batch/device for independent replays. `durableSimulator.js` saves configuration, exact RNG/clock/battery state and pending readings in `SimulatorDevice`. After restart devices are restored **stopped** and require explicit start, not recreation. Current operator access is checked before each scheduled write.
+`reset` stops the scheduler, restores the configured clock start and battery level, reinitializes the seeded generator, and removes the last runtime reading. It never deletes persisted logs, alerts, telemetry checkpoints, or quarantine holds. Replaying the same tick identity returns its existing log; a different sequence at an old timestamp can be stored but is skipped by alert evaluation as stale. Use a separate demo batch/device for independent replays. `durableSimulator.js` saves configuration, exact RNG/clock/battery state and pending readings in `SimulatorDevice`. After restart devices are restored **stopped** and require explicit start, not recreation. Current operator access is checked before each scheduled write.
 
-Overlapping ticks/resets are rejected while persistence is in flight. Scheduled ticks skip a busy device. A persistence error stops its timer, exposes `lastError` and `pendingRetry` in status, and retains the exact reading for an explicit retry. Raw ingestion is append-only and not exactly-once: a partially successful write can leave duplicate raw logs on retry; alert state and notifications are deduplicated. `stop` prevents future timer ticks but does not cancel a write already in flight.
+Overlapping ticks/resets are rejected while persistence is in flight. Scheduled ticks skip a busy device. A persistence error stops its timer, exposes `lastError` and `pendingRetry` in status, and retains the exact reading for an explicit retry. Sequenced simulator/sensor readings are idempotent at the `TemperatureLog` record layer, including retries after a partial write; legacy payloads without a complete identity can still append duplicates. Alert state and notifications are independently deduplicated. `stop` prevents future timer ticks but does not cancel a write already in flight.
 
 ## Scenarios
 

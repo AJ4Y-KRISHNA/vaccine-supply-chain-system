@@ -8,6 +8,8 @@ const TemperatureLogSchema = new mongoose.Schema({
   // allowing software-simulated (and future real) IoT telemetry to be recorded.
   deviceId: String,
   vehicleId: String,
+  sequenceNumber: { type: Number, min: 0 },
+  idempotencyKey: { type: String, select: false },
   temperature: Number,
   humidity: Number,
   batteryLevel: Number,
@@ -27,4 +29,8 @@ const TemperatureLogSchema = new mongoose.Schema({
 });
 
 require("./demoFields")(TemperatureLogSchema);
+TemperatureLogSchema.index(
+  { idempotencyKey: 1 },
+  { unique: true, sparse: true, name: "temperature_log_idempotency_key_unique" }
+);
 module.exports = mongoose.model("TemperatureLog", TemperatureLogSchema);

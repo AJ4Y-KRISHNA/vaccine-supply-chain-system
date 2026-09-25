@@ -10,6 +10,7 @@ const tempSchema = Joi.array().items(
     sensorId: Joi.string().allow(""),
     deviceId: Joi.string().allow(""),
     vehicleId: Joi.string().allow(""),
+    sequenceNumber: Joi.number().integer().min(0),
     temperature: Joi.number().min(-100).max(100).required(),
     humidity: Joi.number().min(0).max(100),
     batteryLevel: Joi.number().min(0).max(100),
