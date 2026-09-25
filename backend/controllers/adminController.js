@@ -6,6 +6,7 @@ const TemperatureLog = require("../models/TemperatureLog");
 const Vaccination = require("../models/Vaccination");
 const AdminAction = require("../models/AdminAction");
 const { getForecast, getSentiment } = require("../services/aiService");
+const { getForecastSupplyContext } = require("../services/forecastSupplyContext");
 const { logLifecycleEventOnChain, extractHash } = require("../services/blockchainService");
 
 exports.getUserManagement = async (_req, res) => {
@@ -120,14 +121,21 @@ exports.getReportsAndInsights = async (_req, res) => {
     const vaccinations = await Vaccination.find().sort({ date: -1 }).limit(12).lean();
     const distributions = await Distribution.find().sort({ timestamp: -1 }).limit(6).lean();
 
-    let forecast = { predicted_demand: 0 };
+    let forecast = { predicted_demand: 0, explanation_breakdown: null };
     const vaccinationHistory = vaccinations.reverse().map((item) => Number(item.dosesUsed || item.receivedDoses || 0));
 
     if (vaccinationHistory.filter((value) => value > 0).length >= 4) {
       try {
-        forecast = await getForecast({ vaccination_data: vaccinationHistory });
+        const vaccineTypes = [...new Set(vaccinations.map(item => String(item.vaccineType || "").trim()).filter(Boolean))];
+        let supplyContext = null;
+        try {
+          supplyContext = await getForecastSupplyContext(vaccineTypes.length === 1 ? vaccineTypes[0] : null);
+        } catch (_contextError) {
+          // Demand can still be estimated when the optional inventory snapshot is unavailable.
+        }
+        forecast = await getForecast({ vaccination_data: vaccinationHistory, supply_context: supplyContext });
       } catch (_err) {
-        forecast = { predicted_demand: 0 };
+        forecast = { predicted_demand: 0, explanation_breakdown: null };
       }
     }
 

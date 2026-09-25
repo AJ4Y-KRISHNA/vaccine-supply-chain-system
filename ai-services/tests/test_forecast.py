@@ -41,4 +41,52 @@ class BaselineTests(unittest.TestCase):
         result = forecast([10 + (i * 7) % 19 for i in range(48)])
         self.assertEqual({m["observations"] for m in result["validation"]["comparison"].values()}, {12})
 
+    def test_explanation_breakdown_is_explicit_and_rules_based(self):
+        result = forecast([10, 12, 11, 14, 15, 18, 20, 22])
+        explanation = result["explanation_breakdown"]
+        self.assertEqual(explanation["version"], "heuristic-baseline-explanation-v1")
+        self.assertIn(explanation["selected_baseline"], ("naive", "mean_3", "drift"))
+        self.assertTrue(explanation["calculation"])
+        self.assertTrue(explanation["inputs"])
+        self.assertIn("recent_volume_trend", explanation)
+        self.assertFalse(explanation["seasonality"]["modeled"])
+        self.assertIn("not SHAP, LIME", explanation["methodology"])
+
+    def test_forecast_endpoint_accepts_optional_supply_context(self):
+        response = asyncio.run(forecast_demand(ForecastRequest(
+            vaccination_data=[10, 12, 11, 14, 15, 18],
+            supply_context={
+                "status": "available", "scope": "single vaccine type", "vaccine_type": "Demo",
+                "total_unallocated_stock_doses": 50, "current_available_stock_doses": 40,
+                "active_quarantine_batch_count": 1, "quarantined_unallocated_doses": 10,
+                "unavailable_unallocated_stock_doses": 10,
+            },
+        )))
+        self.assertEqual(response["explanation_breakdown"]["supply_context"]["current_available_stock_doses"], 40)
+
+    def test_active_quarantine_changes_supply_explanation_not_demand_number(self):
+        values = [10, 12, 11, 14, 15, 18, 20, 22]
+        normal_context = {
+            "status": "available", "scope": "single vaccine type", "vaccine_type": "Demo",
+            "total_unallocated_stock_doses": 100, "current_available_stock_doses": 100,
+            "active_quarantine_batch_count": 0, "quarantined_unallocated_doses": 0,
+            "unavailable_unallocated_stock_doses": 0, "captured_at": "2026-01-01T00:00:00Z",
+        }
+        held_context = {
+            **normal_context, "current_available_stock_doses": 70,
+            "active_quarantine_batch_count": 1, "quarantined_unallocated_doses": 30,
+            "unavailable_unallocated_stock_doses": 30,
+        }
+        normal = forecast(values, supply_context=normal_context)
+        held = forecast(values, supply_context=held_context)
+        normal_supply = normal["explanation_breakdown"]["supply_context"]
+        held_supply = held["explanation_breakdown"]["supply_context"]
+        self.assertEqual(normal["predicted_demand"], held["predicted_demand"])
+        self.assertEqual(held_supply["active_quarantine_batch_count"], 1)
+        self.assertEqual(held_supply["current_available_stock_doses"], 70)
+        self.assertEqual(held_supply["quarantined_unallocated_doses"], 30)
+        self.assertIn("30 unallocated dose(s)", held_supply["quarantine_description"])
+        self.assertNotEqual(normal_supply["quarantine_description"], held_supply["quarantine_description"])
+        self.assertFalse(held_supply["used_to_change_predicted_demand"])
+
 if __name__ == "__main__": unittest.main()

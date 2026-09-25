@@ -24,6 +24,12 @@ Run `python evaluate_forecast.py` from `ai-services`. The script generates a 48-
 
 The selected model was **not** best on the later evaluation suffix. That is a useful honest result: selection did not peek at future outcomes. Final selected forecast is 1,987 synthetic dose-units. No CNN-LSTM superiority is claimed; that module remains experimental and was not benchmarked here. No BERT accuracy is claimed; default sentiment is a labeled heuristic.
 
+### 2026-09-25 update — Forecast explanation breakdown
+
+The forecast response now includes a deterministic explanation breakdown for the selected baseline: its rolling-error selection rule, the exact calculation and observations used, a recent-volume comparison, and an explicit statement that seasonality is not modeled. This is a rule-based summary of the implemented formulas, not SHAP, LIME, or model-internal attribution. Current eligible stock and active cold-chain holds are displayed as separate supply context; they do not alter the predicted-demand number. Active holds exclude affected unallocated doses from the reported eligible-stock total. If the demand history pools more than one vaccine type, the inventory context is explicitly scoped to all recorded types and should not be interpreted as product-specific coverage.
+
+Automated tests verify the explanation response structure, the quarantine/available-stock fields, that adding an active quarantine changes the supply explanation, and that the demand estimate itself remains unchanged by this supply context. These checks establish deterministic software behavior only; they do not validate forecast accuracy or vaccine policy.
+
 ## Allocation, durability and chain evidence
 
 - Five planning tests include 100 deterministic varied-capacity trials with no stock, demand, transport or shared-destination capacity violation. Held, unreleased, wrong-product, unknown-expiry, expired and expiry-before-arrival candidates are excluded.

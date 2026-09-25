@@ -37,6 +37,7 @@ import SentimentFeedbackPanel from "../components/Admin/SentimentFeedbackPanel";
 import TemperatureAlertPanel from "../components/TemperatureAlertPanel";
 import SimulatorPanel from "../components/SimulatorPanel";
 import SupplyPlannerPanel from "../components/Admin/SupplyPlannerPanel";
+import ForecastExplanation from "../components/ForecastExplanation";
 import OrderAllocationFields from "../components/Admin/OrderAllocationFields";
 import {
   fetchAdminMonitoring,
@@ -976,6 +977,7 @@ const AdminDashboard = () => {
                     </div>
                   )}
                 </div>
+                <ForecastExplanation forecast={reports?.forecast} />
               </div>
 
               <div id="admin-sentiment" className="rounded-[14px] border border-[#e4edf8] bg-white p-5 shadow-sm">
