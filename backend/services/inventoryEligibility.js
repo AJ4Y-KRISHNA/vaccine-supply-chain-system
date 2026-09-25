@@ -17,6 +17,8 @@ function assessBatch(batch, shipments, alerts, manufacturers) {
   if (!batch.releaseVisibleToExternal || !batch.productionApproved || !batch.labApproved || batch.reportStatus !== "Reported") reasons.push("BATCH_NOT_RELEASED");
   if (batch.coldChainHoldAlertIds?.length || assigned.some(s => s.coldChainHoldAlertIds?.length) ||
     alerts.some(a => a.batchId === batch.batchId && a.requiresQualityReview)) reasons.push("COLD_CHAIN_HOLD");
+  const disposition = batch.disposition?.status || "active";
+  if (disposition !== "active") reasons.push(`BATCH_DISPOSITION_${String(disposition).toUpperCase()}`);
   if (!isDoseCount(batch.quantity) || assigned.some(s => !isDoseCount(s.quantity))) reasons.push("INVALID_STOCK_RECORDS");
   const assignedDoses = assigned.reduce((sum, s) => sum + (isDoseCount(s.quantity) ? s.quantity : 0), 0);
   const remainingDoses = isDoseCount(batch.quantity) ? Math.max(0, batch.quantity - assignedDoses) : 0;

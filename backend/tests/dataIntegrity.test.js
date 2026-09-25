@@ -24,5 +24,6 @@ test("allocation never assumes unknown quantities or silently returns cancelled 
   const batch = { batchId: "B", manufacturer: "maker", quantity: 100, releaseVisibleToExternal: true, productionApproved: true, labApproved: true, reportStatus: "Reported" };
   const result = assessBatch(batch, [{ batchId: "B", quantity: 60, status: "Cancelled" }], [], [{ manufacturer: "maker" }]);
   expect(result).toMatchObject({ eligible: true, remainingDoses: 40 });
+  expect(assessBatch({ ...batch, disposition: { status: "recalled" } }, [], [], [{ manufacturer: "maker" }]).reasons).toContain("BATCH_DISPOSITION_RECALLED");
   expect(assessBatch(batch, [{ batchId: "B" }], [], [{ manufacturer: "maker" }]).reasons).toContain("INVALID_STOCK_RECORDS");
 });

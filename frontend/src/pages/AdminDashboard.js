@@ -48,6 +48,8 @@ import {
   runAdminSentiment,
 } from "../services/workflow";
 
+import BatchDispositionBadge from "../components/BatchDispositionBadge";
+
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, ArcElement, Tooltip, Legend);
 
 const EMPTY_MONITORING = {
@@ -332,6 +334,7 @@ const AdminDashboard = () => {
           title: item.batchId || "--",
           subtitle: item.vaccineType || "Vaccine batch",
           status: item.coldChainStatus || item.status || "Created",
+          disposition: item.disposition,
           meta: formatDateTime(item.createdAt),
           txHash: item.txHash,
         })),
@@ -621,9 +624,12 @@ const AdminDashboard = () => {
                           <div className="font-semibold text-[#42566f]">{row.title}</div>
                           <div className="mt-1 text-xs text-[#8192a7]">{row.subtitle}</div>
                         </div>
-                        <span className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${getStatusTone(row.status)}`}>
-                          {row.status}
-                        </span>
+                        <div className="flex flex-col items-end gap-2">
+                          <span className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${getStatusTone(row.status)}`}>
+                            {row.status}
+                          </span>
+                          {monitorView === "batches" ? <BatchDispositionBadge disposition={row.disposition} /> : null}
+                        </div>
                       </div>
                       <div className="mt-2 flex flex-wrap gap-3 text-[12px] text-[#60748f]">
                         <span>{row.meta}</span>

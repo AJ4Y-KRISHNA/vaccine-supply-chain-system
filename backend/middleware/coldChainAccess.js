@@ -14,7 +14,7 @@ function protectOperation(roles, controller, { allowNewBatch = false, newBatchOn
       // Do not permit callers to set policy, quarantine or ownership bypass fields
       // via older controllers that spread req.body into database documents.
       for (const key of Object.keys(req.body || {})) {
-        if (/^(coldChain|temperaturePolicy|canReviewColdChain|isDemo|demoProvenance|organizationAliases|tokenVersion|disabled)/i.test(key) || ["productionApproved", "labApproved", "releaseVisibleToExternal", "releaseApprovedAt"].includes(key)) return res.status(400).json({ error: "Protected fields cannot be supplied here" });
+        if (/^(coldChain|temperaturePolicy|disposition|canReviewColdChain|isDemo|demoProvenance|organizationAliases|tokenVersion|disabled)/i.test(key) || ["productionApproved", "labApproved", "releaseVisibleToExternal", "releaseApprovedAt"].includes(key)) return res.status(400).json({ error: "Protected fields cannot be supplied here" });
       }
       req.body = req.body || {};
       const shipmentId = req.params.shipmentId || req.body.shipmentId;
@@ -28,6 +28,8 @@ function protectOperation(roles, controller, { allowNewBatch = false, newBatchOn
       return await withBatchLock(batchId, async () => {
         const batch = await Batch.findOne({ batchId }).lean();
         if (!batch && !allowNewBatch) return res.status(404).json({ error: "Batch not found" });
+        const disposition = batch?.disposition?.status || "active";
+        if (disposition !== "active") return res.status(409).json({ error: `Batch disposition is ${disposition}; further operational changes are blocked`, code: "BATCH_DISPOSITIONED" });
         const heldShipment = await Shipment.exists({ batchId, "coldChainHoldAlertIds.0": { $exists: true } });
         const heldAlert = await Alert.exists({ batchId, requiresQualityReview: true });
         if (batch?.coldChainHoldAlertIds?.length || heldShipment || heldAlert) return res.status(409).json({ error: "Quarantined—pending quality review", code: "COLD_CHAIN_HOLD" });
