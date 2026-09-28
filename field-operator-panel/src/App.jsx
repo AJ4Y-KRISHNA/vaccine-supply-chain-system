@@ -1,3 +1,4 @@
+import React from "react";
 import {
   Activity,
   Battery,
@@ -10,9 +11,13 @@ import {
   Snowflake,
   Thermometer,
   Truck,
+  Wifi,
   WifiOff,
 } from "lucide-react";
 import TruckRoadScene from "./components/TruckRoadScene.jsx";
+import ShipmentAccessPanel from "./components/ShipmentAccessPanel.jsx";
+import useFieldOperatorSocket from "./hooks/useFieldOperatorSocket.js";
+import { useFieldOperatorStore } from "./stores/fieldOperatorStore.js";
 
 const sections = [
   { number: "01", title: "Truck scene", subtitle: "Shipment and cold-chain state", icon: Truck },
@@ -103,7 +108,55 @@ function RouteDatum({ label }) {
   );
 }
 
+const CONNECTION_PRESENTATION = {
+  idle: { label: "Disconnected", icon: WifiOff, style: "border-border bg-surface text-text-muted" },
+  connecting: {
+    label: "Connecting",
+    icon: Clock3,
+    style: "border-accent/30 bg-accent/10 text-accent",
+  },
+  connected: {
+    label: "Connected",
+    icon: Wifi,
+    style: "border-primary/30 bg-primary-glow text-primary",
+  },
+  reconnecting: {
+    label: "Reconnecting",
+    icon: WifiOff,
+    style: "border-warning/30 bg-warning/10 text-warning",
+  },
+};
+
 function App() {
+  const accessToken = useFieldOperatorStore((state) => state.accessToken);
+  const selectedShipmentId = useFieldOperatorStore((state) => state.selectedShipmentId);
+  const shipments = useFieldOperatorStore((state) => state.shipments);
+  const shipmentLoadStatus = useFieldOperatorStore((state) => state.shipmentLoadStatus);
+  const connectionStatus = useFieldOperatorStore((state) => state.connectionStatus);
+  const reconnectAttempt = useFieldOperatorStore((state) => state.reconnectAttempt);
+  const connectionError = useFieldOperatorStore((state) => state.connectionError);
+  const simulationClock = useFieldOperatorStore((state) => state.simulationClock);
+  const selectedShipmentIsAvailable =
+    shipmentLoadStatus === "ready" &&
+    shipments.some((shipment) => shipment.shipmentId === selectedShipmentId);
+
+  useFieldOperatorSocket({
+    shipmentId: selectedShipmentIsAvailable ? selectedShipmentId : "",
+    accessToken,
+  });
+
+  const connection = CONNECTION_PRESENTATION[connectionStatus] || CONNECTION_PRESENTATION.idle;
+  const ConnectionIcon = connection.icon;
+  const overviewMessage = !accessToken
+    ? "Sign in to load shipments scoped to your role."
+    : !selectedShipmentIsAvailable
+      ? "Choose an accessible in-transit shipment to start its live connection."
+      : connectionStatus === "connected"
+        ? "Shipment selected. Live connection established; telemetry widgets are ready for the next integration step."
+        : connectionStatus === "reconnecting"
+          ? `Live connection interrupted. Reconnecting (attempt ${reconnectAttempt})…`
+          : "Shipment selected. Waiting for the backend live connection.";
+
   return (
     <div className="min-h-screen bg-background text-text-primary">
       <header className="fixed inset-x-0 top-0 z-20 h-16 border-b border-border bg-background/95 backdrop-blur">
@@ -121,19 +174,22 @@ function App() {
           </div>
 
           <div className="hidden min-w-0 flex-1 justify-center px-4 md:flex">
-            <span className="operator-mono max-w-64 truncate rounded-input border border-border bg-surface px-3 py-2 text-xs text-text-muted">
-              Shipment: not selected
+            <span className="operator-mono max-w-64 truncate rounded-input border border-border bg-surface px-3 py-2 text-xs text-text-secondary">
+              Shipment: {selectedShipmentId || "not selected"}
             </span>
           </div>
 
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-            <span className="inline-flex items-center gap-1.5 rounded-pill border border-danger/30 bg-danger-glow px-2.5 py-1 text-xs text-danger sm:px-3">
-              <WifiOff aria-hidden="true" className="h-3.5 w-3.5" />
-              <span>Disconnected</span>
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-pill border px-2.5 py-1 text-xs sm:px-3 ${connection.style}`}
+              aria-live="polite"
+            >
+              <ConnectionIcon aria-hidden="true" className="h-3.5 w-3.5" />
+              <span>{connection.label}</span>
             </span>
             <span className="hidden items-center gap-1.5 text-xs text-text-muted lg:inline-flex">
               <Clock3 aria-hidden="true" className="h-3.5 w-3.5" />
-              Clock unavailable
+              <span className="max-w-40 truncate">{simulationClock || "Clock unavailable"}</span>
             </span>
             <span className="rounded-pill border border-accent/30 bg-accent/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-accent sm:text-xs">
               Simulated
@@ -152,14 +208,31 @@ function App() {
               Shipment overview
             </h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-text-secondary">
-              Select a shipment in a later step to view its simulated cold-chain status and operator
-              workflow.
+              Select an in-transit shipment to establish its simulated cold-chain monitoring
+              session.
             </p>
           </div>
-          <span className="w-fit rounded-pill border border-warning/30 bg-warning/10 px-3 py-1.5 text-xs font-medium text-warning">
-            Waiting for shipment data
+          <span
+            className={`w-fit rounded-pill border px-3 py-1.5 text-xs font-medium ${connection.style}`}
+          >
+            {connection.label}
           </span>
         </div>
+
+        <ShipmentAccessPanel />
+        {connectionError && selectedShipmentIsAvailable && (
+          <p
+            className="-mt-3 mb-6 rounded-input border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning"
+            role="status"
+          >
+            {connectionError}
+          </p>
+        )}
+        {selectedShipmentIsAvailable && connectionStatus !== "connected" && (
+          <p className="-mt-3 mb-6 text-xs text-text-muted" role="status">
+            {overviewMessage}
+          </p>
+        )}
 
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
           <section
