@@ -72,6 +72,43 @@ body {
   @apply font-mono;
 }
 
+@keyframes road-marking-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-7.25rem);
+  }
+}
+
+.road-markings-track {
+  display: flex;
+  width: max-content;
+  height: 100%;
+  align-items: center;
+  gap: 5rem;
+  transform: translateX(0);
+}
+
+.road-marking {
+  display: block;
+  width: 2.25rem;
+  height: 100%;
+  flex: none;
+  border-radius: 9999px;
+  @apply bg-road-marking;
+  opacity: 0.7;
+}
+
+.road-markings-moving {
+  animation: road-marking-scroll 1.35s linear infinite;
+}
+
+.truck-led-critical {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -80,5 +117,10 @@ body {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .road-markings-moving {
+    animation: none !important;
+    transform: none !important;
   }
 }

@@ -18,6 +18,10 @@ export default {
         "text-primary": "#F9FAFB",
         "text-secondary": "#9CA3AF",
         "text-muted": "#4B5563",
+        night: "#0F172A",
+        "road-asphalt": "#1C1C1E",
+        "road-shoulder": "#374151",
+        "road-marking": "#D1D5DB",
       },
       fontFamily: {
         sans: ["Inter", "system-ui", "-apple-system", "sans-serif"],

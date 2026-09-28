@@ -12,6 +12,7 @@ import {
   Truck,
   WifiOff,
 } from "lucide-react";
+import TruckRoadScene from "./components/TruckRoadScene.jsx";
 
 const sections = [
   { number: "01", title: "Truck scene", subtitle: "Shipment and cold-chain state", icon: Truck },
@@ -166,20 +167,16 @@ function App() {
             className="operator-panel-surface p-5 sm:p-6 xl:col-span-12"
           >
             <SectionHeading {...sections[0]} />
-            <div className="relative flex min-h-[220px] items-center justify-center overflow-hidden rounded-input border border-border bg-background px-5 py-8 sm:min-h-[280px]">
-              <div
-                aria-hidden="true"
-                className="absolute inset-x-0 bottom-10 h-px border-t border-dashed border-border"
-              />
-              <div
-                aria-hidden="true"
-                className="absolute inset-x-0 bottom-[4.7rem] h-px border-t border-dashed border-border/60"
-              />
-              <Placeholder className="relative w-full max-w-lg bg-surface/90">
-                <Truck aria-hidden="true" className="mb-3 h-8 w-8 text-text-muted" />
-                Shipment scene will appear when a shipment is selected.
-              </Placeholder>
-            </div>
+            <TruckRoadScene
+              statusColor="unknown"
+              temperature={null}
+              humidity={null}
+              speed={null}
+              isMoving={false}
+              isQuarantined={false}
+              progress={null}
+              weatherState="clear"
+            />
             <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
               {["Shipment", "Batch", "Vehicle", "Progress"].map((label) => (
                 <div
