@@ -18,10 +18,23 @@ function evaluateTemperature({ temperature, policy }) {
   return { violationType, deviation: round(deviation), severity: violationType === "NORMAL" ? "NORMAL" : "WARNING" };
 }
 
+function evaluateHumidity({ humidity, policy }) {
+  if (!numeric(humidity)) throw new Error("Humidity reading must be a finite number");
+  if (!numeric(policy.minimumHumidity) || !numeric(policy.maximumHumidity)) {
+    return { violationType: "NOT_CONFIGURED", deviation: 0, severity: "NORMAL" };
+  }
+  const deviation = humidity < policy.minimumHumidity ? policy.minimumHumidity - humidity
+    : humidity > policy.maximumHumidity ? humidity - policy.maximumHumidity : 0;
+  const violationType = humidity < policy.minimumHumidity ? "LOW_HUMIDITY"
+    : humidity > policy.maximumHumidity ? "HIGH_HUMIDITY" : "NORMAL";
+  return { violationType, deviation: round(deviation), severity: violationType === "NORMAL" ? "NORMAL" : "WARNING" };
+}
+
 async function updateEvent({ reading, state, policy, category, type, reasons, duration = 0, sustained = false, rate = null, shipment, healthLimited = false, closeReason }) {
   const key = `${state.streamKey}:${category}`;
   let alert = await Alert.findOne({ activeExcursionKey: key });
   const timestamp = new Date(reading.timestamp);
+  const currentReading = { temperature: reading.temperature, humidity: reading.humidity, timestamp };
   if (!reasons.length) {
     if (!alert) return null;
     alert.excursionClosedAt = timestamp;
@@ -29,6 +42,8 @@ async function updateEvent({ reading, state, policy, category, type, reasons, du
     alert.latestReadingAt = timestamp;
     alert.timestamp = timestamp;
     alert.currentTemperature = reading.temperature;
+    alert.currentHumidity = reading.humidity;
+    alert.currentReading = currentReading;
     alert.reason = `${closeReason || `Latest reading is within the approved ${category.toLowerCase()} rules.`} Previous event: ${alert.reason}`;
     alert.phase = alert.requiresQualityReview ? "QUARANTINED" : "RECOVERED";
     alert.recommendedAction = alert.requiresQualityReview ? "Hold remains in place. Request quality review and clearance." : "Continue monitoring.";
@@ -43,13 +58,27 @@ async function updateEvent({ reading, state, policy, category, type, reasons, du
     vehicleId: reading.vehicleId || "", manufacturer: reading.manufacturer,
     manufacturerKey: normaliseKey(reading.manufacturer), activeExcursionKey: key,
     excursionStartedAt: timestamp, engineVersion: "cold-chain-rules-v1", policyId: policy._id,
-    policySnapshot: policy,
+    policySnapshot: policy, vaccineType: policy.vaccineType,
   });
   const reliability = category === "RELIABILITY";
   const phase = sustained ? "QUARANTINED" : reliability ? "RELIABILITY_ISSUE" : "REVIEW_REQUIRED";
   alert.currentTemperature = reading.temperature;
-  alert.minimumAllowedTemperature = policy.minimumTemperature;
-  alert.maximumAllowedTemperature = policy.maximumTemperature;
+  alert.currentHumidity = reading.humidity;
+  alert.currentReading = currentReading;
+  alert.vaccineType = policy.vaccineType;
+  if (category === "TEMPERATURE") {
+    alert.metric = "TEMPERATURE";
+    alert.minimumAllowedTemperature = policy.minimumTemperature;
+    alert.maximumAllowedTemperature = policy.maximumTemperature;
+    alert.breachedLimit = type === "LOW_TEMPERATURE" ? policy.minimumTemperature : policy.maximumTemperature;
+  } else if (category === "HUMIDITY") {
+    alert.metric = "HUMIDITY";
+    alert.minimumAllowedHumidity = policy.minimumHumidity;
+    alert.maximumAllowedHumidity = policy.maximumHumidity;
+    alert.breachedLimit = type === "LOW_HUMIDITY" ? policy.minimumHumidity : policy.maximumHumidity;
+  } else {
+    alert.metric = "RELIABILITY";
+  }
   alert.violationType = type;
   alert.severity = sustained || alert.requiresQualityReview ? "CRITICAL" : "WARNING";
   alert.reasons = reasons;
@@ -60,9 +89,13 @@ async function updateEvent({ reading, state, policy, category, type, reasons, du
   alert.longitude = reading.longitude;
   alert.temperatureLogId = reading.temperatureLogId;
   alert.excursionDurationMs = duration;
-  if (numeric(reading.temperature)) {
+  if (category === "TEMPERATURE" && numeric(reading.temperature)) {
     alert.minimumExcursionTemperature = Math.min(alert.minimumExcursionTemperature ?? reading.temperature, reading.temperature);
     alert.maximumExcursionTemperature = Math.max(alert.maximumExcursionTemperature ?? reading.temperature, reading.temperature);
+  }
+  if (category === "HUMIDITY" && numeric(reading.humidity)) {
+    alert.minimumExcursionHumidity = Math.min(alert.minimumExcursionHumidity ?? reading.humidity, reading.humidity);
+    alert.maximumExcursionHumidity = Math.max(alert.maximumExcursionHumidity ?? reading.humidity, reading.humidity);
   }
   alert.phase = alert.requiresQualityReview ? "QUARANTINED" : phase;
   alert.recommendedAction = alert.requiresQualityReview ? "Hold remains in place. Request quality review and clearance." : reliability ? "Check device/simulation and request another reading."
@@ -104,9 +137,20 @@ async function evaluateReading(reading, temperatureLogId) {
     const rate = gap > 0 && numeric(state.temperature) ? round((reading.temperature - state.temperature) / (gap / 60000)) : null;
     const evaluation = evaluateTemperature({ temperature: reading.temperature, policy });
     const abnormal = evaluation.violationType !== "NORMAL";
+    const humidityConfigured = numeric(policy.minimumHumidity) && numeric(policy.maximumHumidity);
+    const humidityEvaluation = humidityConfigured && numeric(reading.humidity)
+      ? evaluateHumidity({ humidity: reading.humidity, policy })
+      : null;
+    const humidityType = humidityEvaluation?.violationType || "NORMAL";
+    const humidityAbnormal = humidityType === "LOW_HUMIDITY" || humidityType === "HIGH_HUMIDITY";
     if (state.lastReadingAt && state.temperatureDirection !== "NORMAL" && (gapExceeded || !samePolicy || abnormal && state.temperatureDirection !== evaluation.violationType)) {
       await updateEvent({ reading, state, policy, category: "TEMPERATURE", reasons: [],
         closeReason: "Prior continuous excursion ended: gap, policy revision, or excursion direction changed; continuous exposure is not inferred across this boundary." });
+    }
+    if (state.lastReadingAt && state.humidityDirection && state.humidityDirection !== "NORMAL" &&
+      (gapExceeded || !samePolicy || !humidityAbnormal || state.humidityDirection !== humidityType)) {
+      await updateEvent({ reading, state, policy, category: "HUMIDITY", reasons: [],
+        closeReason: "Prior continuous humidity excursion ended: the measurement returned in range, became unavailable, the gap exceeded policy, or the policy revision changed." });
     }
     if (abnormal && (!state.temperatureSince || gapExceeded || !samePolicy || state.temperatureDirection !== evaluation.violationType)) state.temperatureSince = timestamp;
     if (!abnormal) state.temperatureSince = undefined;
@@ -116,32 +160,40 @@ async function evaluateReading(reading, temperatureLogId) {
     const reasons = abnormal ? [
       `${sustained ? "Critical" : "Review required"}: ${reading.temperature}°C is ${evaluation.deviation}°C ${evaluation.violationType === "HIGH_TEMPERATURE" ? "above the approved maximum" : "below the approved minimum"} of ${evaluation.violationType === "HIGH_TEMPERATURE" ? policy.maximumTemperature : policy.minimumTemperature}°C for ${round(duration / 60000)} consecutive measured minutes.`,
     ] : [];
+    if (humidityAbnormal && (!state.humiditySince || gapExceeded || !samePolicy || state.humidityDirection !== humidityType)) state.humiditySince = timestamp;
+    if (!humidityAbnormal) state.humiditySince = undefined;
+    state.humidityDirection = humidityType;
+    const humidityDuration = humidityAbnormal ? timestamp - state.humiditySince : 0;
+    const humiditySustained = humidityAbnormal && humidityDuration >= policy.excursionDurationMs;
+    const humidityLimit = humidityType === "LOW_HUMIDITY" ? policy.minimumHumidity : policy.maximumHumidity;
+    const humiditySide = humidityType === "LOW_HUMIDITY" ? "below the approved minimum" : "above the approved maximum";
+    const humidityReasons = humidityAbnormal ? [
+      `${humiditySustained ? "Critical" : "Review required"}: Humidity ${reading.humidity}% is ${humidityEvaluation.deviation}% ${humiditySide} of ${humidityLimit}% for ${round(humidityDuration / 60000)} consecutive measured minutes.`,
+    ] : [];
     const health = [];
     if (!reading.deviceId) health.push("Device identifier is missing; telemetry cannot be attributed to a sensor.");
     if (gapExceeded) health.push(`Reading gap ${gap}ms exceeded the approved ${policy.maximumReadingGapMs}ms; continuous exposure is unknown.`);
     if (!numeric(reading.batteryLevel)) health.push("Battery state was not supplied; device health is unknown.");
     else if (reading.batteryLevel <= policy.criticalBatteryPercent) health.push(`Battery ${reading.batteryLevel}% is at or below the configured ${policy.criticalBatteryPercent}% limit.`);
     if (rate !== null && Math.abs(rate) > policy.maximumRateCelsiusPerMinute) health.push(`Temperature changed at ${rate}°C/min, exceeding the configured ${policy.maximumRateCelsiusPerMinute}°C/min plausibility limit.`);
-    const humidity = [];
-    if (numeric(policy.minimumHumidity) && numeric(policy.maximumHumidity)) {
-      if (!numeric(reading.humidity)) health.push("Humidity is missing for a policy that requires humidity monitoring.");
-      else if (reading.humidity < policy.minimumHumidity || reading.humidity > policy.maximumHumidity) humidity.push(`Humidity ${reading.humidity}% is outside the approved ${policy.minimumHumidity}–${policy.maximumHumidity}% range.`);
-    }
+    if (humidityConfigured && !numeric(reading.humidity)) health.push("Humidity is missing for a policy that requires humidity monitoring.");
     const shared = { reading, state, policy, shipment, rate, healthLimited: health.length > 0 };
     const temperatureAlert = await updateEvent({ ...shared, category: "TEMPERATURE", type: evaluation.violationType, reasons, duration, sustained });
-    const humidityAlert = await updateEvent({ ...shared, category: "HUMIDITY", type: "HUMIDITY", reasons: humidity });
+    const humidityAlert = await updateEvent({ ...shared, category: "HUMIDITY", type: humidityType === "NORMAL" ? "HUMIDITY" : humidityType,
+      reasons: humidityReasons, duration: humidityDuration, sustained: humiditySustained });
     const healthAlert = await updateEvent({ ...shared, category: "RELIABILITY", type: "TELEMETRY_RELIABILITY", reasons: health });
     Object.assign(state, { lastReadingAt: timestamp, checkedAt: timestamp, policyId: policy._id,
       temperature: reading.temperature, humidity: reading.humidity, batteryLevel: reading.batteryLevel,
       latitude: reading.latitude, longitude: reading.longitude, source: reading.source });
     await state.save();
-    const held = sustained || !!(await Alert.exists({ batchId: batch.batchId, requiresQualityReview: true }));
-    return { evaluated: true, policyStatus: "APPROVED", ...evaluation, severity: sustained ? "CRITICAL" : (abnormal || humidity.length || health.length) ? "WARNING" : "NORMAL", batchQuarantined: held,
+    const anySustained = sustained || humiditySustained;
+    const held = anySustained || !!(await Alert.exists({ batchId: batch.batchId, requiresQualityReview: true }));
+    return { evaluated: true, policyStatus: "APPROVED", ...evaluation, severity: anySustained ? "CRITICAL" : (abnormal || humidityAbnormal || health.length) ? "WARNING" : "NORMAL", batchQuarantined: held,
       affected: { batchId: batch.batchId, shipmentId: reading.shipmentId || "", deviceId: reading.deviceId || "" },
       notificationTargets: [...new Set([temperatureAlert, humidityAlert, healthAlert].filter(Boolean).flatMap(a => a.notificationTargets || []))],
       alertIds: [temperatureAlert, humidityAlert, healthAlert].filter(Boolean).map(a => a.alertId),
-      confidence: health.length ? "LIMITED" : "HIGH", reasons: [...reasons, ...humidity, ...health],
-      recommendedAction: held ? "QUARANTINE_PENDING_REVIEW" : abnormal || humidity.length ? "REQUEST_READING" : health.length ? "CHECK_DEVICE" : "RECORD_NORMAL" };
+      confidence: health.length ? "LIMITED" : "HIGH", reasons: [...reasons, ...humidityReasons, ...health],
+      recommendedAction: held ? "QUARANTINE_PENDING_REVIEW" : abnormal || humidityAbnormal ? "REQUEST_READING" : health.length ? "CHECK_DEVICE" : "RECORD_NORMAL" };
   });
 }
 
@@ -175,5 +227,5 @@ async function checkMissingTelemetry(batchId, asOf, expectedDevice = null) {
     return alerts;
   });
 }
-module.exports = { evaluateTemperature, processSimulatedTemperatureReading: evaluateReading, evaluateReading,
+module.exports = { evaluateTemperature, evaluateHumidity, processSimulatedTemperatureReading: evaluateReading, evaluateReading,
   checkMissingTelemetry, buildExcursionKey, normaliseKey };

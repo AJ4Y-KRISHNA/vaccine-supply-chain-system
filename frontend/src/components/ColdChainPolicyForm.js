@@ -37,8 +37,9 @@ export default function ColdChainPolicyForm({ canReview, onChange }) {
     <button type="button" className="my-2 rounded border px-3 py-1" disabled={busy || !batchId.trim()} onClick={() => run(async () => {
       const result = await fetchColdChainPolicy(batchId.trim()); setPolicy(result.policy); setMessage(result.policyStatus);
     })}>Inspect policy</button>
-    {policy ? <p>Revision {policy._id}: {policy.minimumTemperature}–{policy.maximumTemperature}°C; sustained duration {policy.excursionDurationMs}ms; source: {policy.sourceReference}</p> : null}
+    {policy ? <p>Revision {policy._id}: {policy.minimumTemperature}–{policy.maximumTemperature}°C; humidity {policy.minimumHumidity != null && policy.maximumHumidity != null ? `${policy.minimumHumidity}–${policy.maximumHumidity}%` : "not configured (checks skipped)"}; sustained duration {policy.excursionDurationMs}ms; source: {policy.sourceReference}</p> : null}
     {canReview ? <form onSubmit={approve} className="my-3 grid gap-3 md:grid-cols-2">
+      <p className="md:col-span-2">Humidity monitoring is optional for existing policies. Enter both humidity limits to enable humidity checks; leave both blank to skip them.</p>
       {numericFields.map(([key, label]) => <label key={key} className="flex flex-col">{label}<input aria-label={label} type="number" step="any" required={!key.includes("Humidity")} value={values[key] ?? ""} onChange={e => setValues({ ...values, [key]: e.target.value })} className="rounded border p-2" /></label>)}
       <label className="flex flex-col">Approved policy source/reference<input required minLength={3} value={values.sourceReference || ""} onChange={e => setValues({ ...values, sourceReference: e.target.value })} className="rounded border p-2" /></label>
       <label className="flex flex-col">Policy approval reason<input required minLength={3} value={values.approvalReason || ""} onChange={e => setValues({ ...values, approvalReason: e.target.value })} className="rounded border p-2" /></label>

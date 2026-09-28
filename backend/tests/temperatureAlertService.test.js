@@ -90,6 +90,43 @@ test("humidity, critically low battery, and rate-of-change produce exact reliabi
   expect(result.reasons.join(" ")).toMatch(/2°C\/min/);
   expect(await Alert.countDocuments({ batchId: f.batchId })).toBe(2);
 });
+test.each([
+  { humidity: 35, type: "LOW_HUMIDITY", limit: 40 },
+  { humidity: 85, type: "HIGH_HUMIDITY", limit: 80 },
+])("brief humidity excursion ($type) is review-only and carries its policy evidence", async ({ humidity, type, limit }) => {
+  const f = await fixture({ policy: { excursionDurationMs: 120000 } });
+  await evaluateReading(f.reading(5, 0, { humidity }));
+  const result = await evaluateReading(f.reading(5, 1, { humidity }));
+  const alert = await Alert.findOne({ batchId: f.batchId, violationType: type }).lean();
+  expect(result).toMatchObject({ severity: "WARNING", batchQuarantined: false, recommendedAction: "REQUEST_READING" });
+  expect(alert).toMatchObject({ batchId: f.batchId, shipmentId: f.shipmentId, vaccineType: "Synthetic vaccine",
+    metric: "HUMIDITY", violationType: type, breachedLimit: limit, severity: "WARNING", excursionDurationMs: 60000,
+    currentHumidity: humidity, currentReading: { humidity, temperature: 5 }, phase: "REVIEW_REQUIRED", requiresQualityReview: false });
+  expect((await Batch.findOne({ batchId: f.batchId })).coldChainHoldAlertIds || []).toHaveLength(0);
+});
+test("sustained low humidity reaches the policy duration and quarantines the batch for quality review", async () => {
+  const f = await fixture({ policy: { excursionDurationMs: 120000 } });
+  for (let minute = 0; minute <= 2; minute++) await evaluateReading(f.reading(5, minute, { humidity: 30 }));
+  const alert = await Alert.findOne({ batchId: f.batchId, violationType: "LOW_HUMIDITY" }).lean();
+  expect(alert).toMatchObject({ shipmentId: f.shipmentId, batchId: f.batchId, vaccineType: "Synthetic vaccine",
+    metric: "HUMIDITY", currentReading: { humidity: 30, temperature: 5 }, breachedLimit: 40,
+    severity: "CRITICAL", excursionDurationMs: 120000, phase: "QUARANTINED", requiresQualityReview: true });
+  expect(alert.reason).toContain("Humidity 30% is 10% below the approved minimum of 40% for 2 consecutive measured minutes.");
+  expect((await Batch.findOne({ batchId: f.batchId })).coldChainHoldAlertIds).toContain(alert.alertId);
+  expect((await Shipment.findOne({ shipmentId: f.shipmentId })).coldChainHoldAlertIds).toContain(alert.alertId);
+});
+test("in-range humidity creates no humidity alert", async () => {
+  const f = await fixture();
+  const result = await evaluateReading(f.reading(5, 0, { humidity: 55 }));
+  expect(result).toMatchObject({ severity: "NORMAL", batchQuarantined: false, recommendedAction: "RECORD_NORMAL" });
+  expect(await Alert.countDocuments({ batchId: f.batchId, metric: "HUMIDITY" })).toBe(0);
+});
+test("legacy policies without both humidity limits skip humidity evaluation without crashing", async () => {
+  const f = await fixture({ policy: { minimumHumidity: undefined, maximumHumidity: undefined } });
+  const result = await evaluateReading(f.reading(5, 0, { humidity: 99 }));
+  expect(result).toMatchObject({ evaluated: true, severity: "NORMAL", batchQuarantined: false });
+  expect(await Alert.countDocuments({ batchId: f.batchId, metric: "HUMIDITY" })).toBe(0);
+});
 test("explicit simulation-clock checks detect silence and are idempotent; late data cannot erase silence", async () => {
   const f = await fixture();
   await evaluateReading(f.reading(5));

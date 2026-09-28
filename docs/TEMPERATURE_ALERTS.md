@@ -13,20 +13,21 @@ The previous implementation had a deterministic simulator and basic temperature 
 | Temperature/humidity in policy, device evidence complete | Record normal telemetry; no new notification | None |
 | Brief high/low excursion | `REVIEW_REQUIRED`, exact explanation, request another reading | Admin + owning manufacturer |
 | Same-direction excursion reaches the approved duration, without an excessive reading gap | `QUARANTINED`, hold batch and all associated shipments, block dispatch/administration | Admin + manufacturer + assigned distributors + destination hospitals |
-| Humidity outside the configured optional range | Review-required event | Admin + manufacturer |
+| Brief humidity below/above configured limits | `LOW_HUMIDITY` / `HIGH_HUMIDITY`, `REVIEW_REQUIRED`, exact explanation, request another reading | Admin + owning manufacturer |
+| Same-direction humidity excursion reaches the policy's `excursionDurationMs`, without an excessive reading gap | `LOW_HUMIDITY` / `HIGH_HUMIDITY`, `QUARANTINED`, hold batch and associated shipments pending quality review | Admin + manufacturer + assigned distributors + destination hospitals |
 | Missing reading, absent/critical battery, required humidity missing, implausible rate of change | `RELIABILITY_ISSUE`, explain missing/unreliable evidence; recommend device/simulation check | Admin + manufacturer |
 | Normal readings after quarantine | Close the measured excursion, **retain quarantine** | No new normal-reading notification |
 | Authorized reviewer records review, then explicitly clears | Remove this event's hold, retain other holds and original workflow state, append audit records | Relevant recipients above |
 
-Humidity/reliability events do not automatically quarantine in v1; operators may quarantine manually. GPS is simulated context, not an independently verified location. Notification records are in-app only, not email/SMS. A shared role/organization notification's read flag is shared by that recipient group.
+Humidity checks are enabled only when both optional humidity limits are present in the approved policy. Older revisions without either limit remain valid and skip humidity excursion checks; no universal default is applied. Humidity uses the same `excursionDurationMs` and `maximumReadingGapMs` values as temperature. A brief event requests another reading; a sustained event follows the existing sustained-excursion quarantine path. A quarantine hold remains until an authorized reviewer clears it. GPS is simulated context, not an independently verified location. Notification records are in-app only, not email/SMS. A shared role/organization notification's read flag is shared by that recipient group.
 
 ## Data and integration points
 
 1. `iotSimulator.js` generates deterministic device, vehicle, batch, temperature, humidity, GPS, battery and timestamp data from a fixed seed/clock. Its configured range is only a generator setting.
 2. `telemetryService.js` saves both simulator and existing `/api/temperature/ingest` readings into `TemperatureLog`, evaluates each reading, and stores `evaluation` alongside the existing `Normal`/`Alert` status.
-3. `ColdChainPolicy` stores an approved immutable revision. `Batch.coldChainPolicyId` selects the revision. A policy contains temperature limits, optional paired humidity limits, excursion duration, maximum sample gap, battery threshold, rate plausibility threshold, source reference, approval reason, reviewer and approval timestamp. Fixed v1 action rules are stored in the revision too.
+3. `ColdChainPolicy` stores an approved immutable revision. `Batch.coldChainPolicyId` selects the revision. A policy contains temperature limits, optional paired `minimumHumidity` / `maximumHumidity` limits, excursion duration, maximum sample gap, battery threshold, rate plausibility threshold, source reference, approval reason, reviewer and approval timestamp. Humidity fields remain optional for earlier revisions; humidity checks are skipped unless both limits are present. Fixed v1 action rules are stored in the revision too.
 4. `TelemetryState` persists each batch/shipment/device's latest reading and continuous-excursion clock. State survives backend restarts even though simulator schedules do not.
-5. `TemperatureAlert` (the anomaly-event model) stores policy snapshot, severity, confidence explanation, exact reasons, recommended action, affected IDs, humidity/battery/rate, vaccine type/shipment context, notification targets and quality-review metadata.
+5. `TemperatureAlert` (the anomaly-event model) stores policy snapshot, severity, confidence explanation, exact reasons, recommended action, affected IDs, vaccine type, the measured temperature/humidity reading, the breached metric/limit, excursion duration, battery/rate, shipment context, notification targets and quality-review metadata.
 6. `Batch` and `Shipment` have `coldChainHoldAlertIds` and a visible `coldChainStatus` overlay. Their original workflow `status` is not overwritten. The last hold's removal restores the existing workflow eligibility rules; it is not an unconditional dispatch approval.
 7. `Notification` is reused, with stage/role/recipient deduplication keys. The older broad order-notification queries exclude cold-chain notifications so they cannot expose targeted records.
 8. `ColdChainAudit` stores append-only policy approvals, event opening/closure, acknowledge, quarantine, review and clearance records. Authorization is recorded before release mutations. Both event/simulation time and application recording time are retained.
@@ -35,8 +36,8 @@ No historical telemetry or legacy `Batch.temperaturePolicy` values are deleted o
 
 ### Deterministic evaluation
 
-- First abnormal sample: warning, duration zero. Equal-to-boundary values are in range.
-- Later samples use their recorded timestamps, not elapsed wall time. Same-direction samples within the approved maximum gap accumulate duration. The threshold is inclusive (`duration >= excursionDurationMs`).
+- First abnormal temperature or humidity sample: warning, duration zero. Equal-to-boundary values are in range.
+- Later samples use their recorded timestamps, not elapsed wall time. Same-direction temperature or humidity samples within the approved maximum gap accumulate duration independently. Both use the approved policy threshold inclusively (`duration >= excursionDurationMs`).
 - Missing intervals, direction changes and policy revisions reset continuous-exposure evidence. The engine does not infer sustained exposure across an unobserved gap.
 - Stale, conflicting or duplicate timestamps cannot roll state backward or clear a hold. Resetting the generator never clears database safety state.
 - Confidence is `HIGH` or `LIMITED` evidence completeness, explicitly **not** a calibrated probability, an ML score, or a vaccine safety judgment.
@@ -132,7 +133,7 @@ Backend: `npm test` from `backend`, or `node node_modules/jest/bin/jest.js --run
 
 Frontend: `npm test -- --watchAll=false --runInBand`, then `npm run build`, from `frontend`. Direct equivalents are `node node_modules/react-scripts/scripts/test.js --watchAll=false --runInBand` and `node node_modules/react-scripts/scripts/build.js`.
 
-Coverage includes deterministic seeds/clocks and all five scenarios; GPS endpoint/reversal; retry/busy/reset behavior; normal/brief/sustained high/low; exact 18-minute explanation; missing/late/duplicate readings; humidity/battery/rate; no approved policy; raw ingestion compatibility; recipient isolation; review/evidence freshness; independent holds; append-only model enforcement; operational bypass attempts; policy validation; and dashboard actions. The production build has been verified successfully under the supplied Node 24 runtime; the earlier unverified stall diagnosis no longer applies.
+Coverage includes deterministic seeds/clocks and all five scenarios; GPS endpoint/reversal; retry/busy/reset behavior; normal/brief/sustained high/low temperature; brief low/high humidity; sustained low-humidity quarantine; in-range humidity; legacy policies with no humidity limits; exact 18-minute temperature explanation; missing/late/duplicate readings; battery/rate; no approved policy; raw ingestion compatibility; recipient isolation; review/evidence freshness; independent holds; append-only model enforcement; operational bypass attempts; policy validation; and dashboard actions. The production build has been verified successfully under the supplied Node 24 runtime; the earlier unverified stall diagnosis no longer applies.
 
 ## Prototype limits and recommended next steps
 

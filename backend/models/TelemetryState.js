@@ -16,5 +16,7 @@ module.exports = mongoose.model("TelemetryState", new mongoose.Schema({
   longitude: Number,
   temperatureSince: Date,
   temperatureDirection: String,
+  humiditySince: Date,
+  humidityDirection: String,
   source: String,
 }));

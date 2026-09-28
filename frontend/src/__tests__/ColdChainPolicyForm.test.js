@@ -21,6 +21,24 @@ test("policy form starts without medical defaults and submits only explicit revi
   expect(changed).toHaveBeenCalledTimes(1);
 });
 
+test("reviewer can configure a paired humidity range and existing revisions explain skipped checks", async () => {
+  approveColdChainPolicy.mockResolvedValue({ policy: { _id: "revision-humidity" } });
+  fetchColdChainPolicy.mockResolvedValue({ policy: { _id: "legacy-revision", minimumTemperature: 2, maximumTemperature: 8, excursionDurationMs: 120000, sourceReference: "Synthetic fixture" }, policyStatus: "APPROVED" });
+  render(<ColdChainPolicyForm canReview onChange={jest.fn()} />);
+  expect(screen.getByText(/leave both blank to skip them/i)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Policy batch ID"), { target: { value: "BATCH-HUMIDITY" } });
+  fireEvent.click(screen.getByText("Inspect policy"));
+  expect(await screen.findByText(/humidity not configured \(checks skipped\)/i)).toBeInTheDocument();
+  const values = [["Minimum temperature (°C)", "2"], ["Maximum temperature (°C)", "8"],
+    ["Minimum humidity (%) — optional", "40"], ["Maximum humidity (%) — optional", "80"],
+    ["Sustained excursion duration (milliseconds)", "120000"], ["Maximum reading gap (milliseconds)", "90000"],
+    ["Critical battery (%)", "10"], ["Maximum plausible change (°C/minute)", "100"],
+    ["Approved policy source/reference", "Synthetic fixture"], ["Policy approval reason", "Test only"]];
+  for (const [label, value] of values) fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  fireEvent.click(screen.getByText("Approve new policy revision"));
+  await waitFor(() => expect(approveColdChainPolicy).toHaveBeenCalledWith("BATCH-HUMIDITY", expect.objectContaining({ minimumHumidity: 40, maximumHumidity: 80 })));
+});
+
 test("non-reviewers can inspect policy and check silence, but cannot approve", async () => {
   fetchColdChainPolicy.mockResolvedValue({ policy: null, policyStatus: "POLICY_NOT_APPROVED" });
   checkColdChainTelemetry.mockResolvedValue({ alerts: [{}] });

@@ -212,7 +212,10 @@ export default function TemperatureAlertPanel({ role }) {
                 </div> : null}
               </div>
               {selectedAlert?.alertId === alert.alertId ? <div className="mt-4 grid grid-cols-1 gap-3 rounded-lg bg-[#f8fbff] p-3 text-sm text-[#526a86] md:grid-cols-2">
-                <div><b>Current temperature:</b> {temperature(alert.currentTemperature)}</div><div><b>Allowed range:</b> {temperature(alert.minimumAllowedTemperature)} – {temperature(alert.maximumAllowedTemperature)}</div>
+                <div><b>Vaccine:</b> {alert.vaccineType || alert.context?.vaccineType || "--"}</div><div><b>Current temperature:</b> {temperature(alert.currentTemperature)}</div>
+                <div><b>Allowed temperature range:</b> {temperature(alert.minimumAllowedTemperature)} – {temperature(alert.maximumAllowedTemperature)}</div>
+                <div><b>Current humidity:</b> {alert.currentHumidity == null ? "--" : `${alert.currentHumidity}%`}</div>
+                {alert.metric === "HUMIDITY" ? <><div><b>Allowed humidity range:</b> {alert.minimumAllowedHumidity ?? "--"}% – {alert.maximumAllowedHumidity ?? "--"}%</div><div><b>Breached limit:</b> {alert.breachedLimit ?? "--"}%</div></> : alert.metric === "TEMPERATURE" ? <div><b>Breached limit:</b> {alert.breachedLimit ?? "--"}°C</div> : null}
                 <div><b>Shipment:</b> {alert.shipmentId || "--"}</div><div><b>Violation:</b> {alert.violationType}</div>
                 <div><b>Excursion began:</b> {dateTime(alert.excursionStartedAt)}</div><div><b>Latest reading:</b> {dateTime(alert.latestReadingAt)}</div>
                 <div className="md:col-span-2 flex items-center gap-2"><MapPin size={14} /> <b>Simulated location:</b> {alert.latitude ?? "--"}, {alert.longitude ?? "--"}</div>
