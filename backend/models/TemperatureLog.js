@@ -10,6 +10,10 @@ const TemperatureLogSchema = new mongoose.Schema({
   vehicleId: String,
   sequenceNumber: { type: Number, min: 0 },
   idempotencyKey: { type: String, select: false },
+  // Optional simulator provenance; legacy ingestion records remain valid.
+  source: { type: String, enum: ["auto-simulated", "manual-override"] },
+  overrideId: String,
+  operatorUserId: String,
   temperature: Number,
   humidity: Number,
   batteryLevel: Number,
@@ -22,6 +26,9 @@ const TemperatureLogSchema = new mongoose.Schema({
   },
   simulation: {
     source: String,
+    telemetrySource: { type: String, enum: ["auto-simulated", "manual-override"] },
+    overrideId: String,
+    operatorUserId: String,
     scenario: String,
     seed: String,
     tick: Number,

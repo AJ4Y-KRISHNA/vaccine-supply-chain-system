@@ -31,7 +31,9 @@ test("device state survives restart, restores stopped, and continues determinist
     expect(restored.getStatus(config.deviceId)).toMatchObject({ running: false, ticksGenerated: 1, restored: true, durable: true });
     const result = await restored.tickOnce(config.deviceId, persist);
     const reference = new VirtualDeviceSimulator(config); reference.tick();
-    expect(result.reading).toEqual(reference.tick());
+    const expected = reference.tick();
+    expect(result.reading).toMatchObject({ ...expected, source: "auto-simulated", overrideId: null,
+      simulation: { ...expected.simulation, telemetrySource: "auto-simulated", overrideId: null } });
   } finally { restored.clear(); }
 });
 test("pending failed reading survives restart and is retried without advancing again", async () => {

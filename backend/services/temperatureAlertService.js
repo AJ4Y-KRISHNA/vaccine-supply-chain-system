@@ -105,7 +105,8 @@ async function updateEvent({ reading, state, policy, category, type, reasons, du
     basis: "Rule evidence completeness, not a probability of vaccine safety or an ML score.",
   };
   alert.context = { humidity: reading.humidity, batteryLevel: reading.batteryLevel, rateCelsiusPerMinute: rate,
-    vaccineType: policy.vaccineType, shipmentStatus: shipment?.status || "Unknown", source: reading.source };
+    vaccineType: policy.vaccineType, shipmentStatus: shipment?.status || "Unknown", source: reading.source,
+    overrideId: reading.overrideId, operatorUserId: reading.operatorUserId };
   await alert.save();
   if (created) await audit(alert, "EVENT_OPENED", "SYSTEM", alert.reason, timestamp, { policyId: policy._id, context: alert.context });
   if (sustained) await quarantine(alert, "SYSTEM", alert.reason, timestamp);
@@ -125,7 +126,9 @@ async function evaluateReading(reading, temperatureLogId) {
     const timestamp = new Date(reading.timestamp);
     if (!Number.isFinite(timestamp.getTime())) throw new Error("Invalid reading timestamp");
     reading = { ...reading, manufacturer: batch.manufacturer, temperatureLogId,
-      source: reading.simulation?.source || "temperature-ingestion" };
+      source: reading.simulation?.telemetrySource || reading.simulation?.source || "temperature-ingestion",
+      overrideId: reading.simulation?.overrideId || reading.overrideId,
+      operatorUserId: reading.simulation?.operatorUserId || reading.operatorUserId };
     const streamKey = buildExcursionKey(reading);
     let state = await State.findOne({ streamKey });
     if (state && (timestamp <= state.lastReadingAt || timestamp < state.checkedAt)) return { evaluated: false, policyStatus: "STALE_OR_DUPLICATE_READING" };

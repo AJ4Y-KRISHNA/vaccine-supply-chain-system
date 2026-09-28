@@ -3,6 +3,9 @@ const Device = require("../models/SimulatorDevice");
 const User = require("../models/user");
 const Batch = require("../models/Batch");
 const { ownsIdentity } = require("../middleware/identityScope");
+const { withBatchLock } = require("./coldChainLock");
+const { applyOverrideToReading } = require("./simulatorOverrides");
+const { checkMissingTelemetry } = require("./temperatureAlertService");
 const busy = () => Object.assign(new Error("A device operation is still being persisted"), { status: 409 });
 
 class DurableSimulatorManager {
@@ -48,6 +51,7 @@ class DurableSimulatorManager {
       const batch = await Batch.findOne({ batchId: config.batchId }).lean();
       if (!batch || user.role !== "admin" && !ownsIdentity(user, batch.manufacturer)) throw new Error("Simulator batch ownership changed");
     }
+    return user;
   }
   async createDevice(config, actorId) {
     return this.run(config.deviceId, async () => {
@@ -61,24 +65,37 @@ class DurableSimulatorManager {
   }
   async tickOnce(deviceId, persistReading, actorId) {
     return this.run(deviceId, async () => {
-      let reading;
-      try {
-        await this.authorizeRuntime(deviceId, actorId);
-        const result = await this.memory.tickOnce(deviceId, async nextReading => {
-          reading = nextReading;
-          // Durable pending reading and post-tick RNG/clock are saved before ingestion.
+      const config = this.memory.getSimulator(deviceId).config;
+      const tick = async () => {
+        let reading;
+        try {
+          const operator = await this.authorizeRuntime(deviceId, actorId);
+          const operatorUserId = String(operator._id);
+          const result = await this.memory.tickOnce(deviceId, async nextReading => {
+            reading = nextReading;
+            // Durable pending reading and post-tick RNG/clock are saved before ingestion.
+            await this.save(deviceId);
+            if (nextReading.simulation?.sensorFault) {
+              const expectedSince = new Date(+new Date(nextReading.timestamp) - config.tickIntervalMs);
+              return checkMissingTelemetry(nextReading.batchId, nextReading.timestamp, {
+                deviceId: nextReading.deviceId, shipmentId: nextReading.shipmentId, expectedSince,
+              });
+            }
+            return persistReading(nextReading);
+          }, nextReading => applyOverrideToReading(nextReading, { operatorUserId }));
           await this.save(deviceId);
-          return persistReading(nextReading);
-        });
-        await this.save(deviceId);
-        return { ...result, simulation: this.getStatus(deviceId) };
-      } catch (error) {
-        this.memory.stop(deviceId);
-        if (reading) this.memory.pending.set(deviceId, reading);
-        this.memory.errors.set(deviceId, error.message);
-        try { await this.save(deviceId); } catch (_) { /* Preserve in-memory retry; last successful durable checkpoint remains valid. */ }
-        throw error;
-      }
+          return { ...result, simulation: this.getStatus(deviceId) };
+        } catch (error) {
+          this.memory.stop(deviceId);
+          if (reading) this.memory.pending.set(deviceId, reading);
+          this.memory.errors.set(deviceId, error.message);
+          try { await this.save(deviceId); } catch (_) { /* Preserve in-memory retry; last successful durable checkpoint remains valid. */ }
+          throw error;
+        }
+      };
+      // Serialize selection, checkpoint, telemetry write and policy evaluation
+      // with override mutations. Nested policy calls re-enter this same batch lock.
+      return config.batchId ? withBatchLock(config.batchId, tick) : tick();
     });
   }
   async start(deviceId, persistReading, actorId) {
@@ -128,6 +145,17 @@ class DurableSimulatorManager {
   }
   getStatus(deviceId) { return { ...this.memory.getStatus(deviceId), durable: true, restored: this.metadata.get(deviceId)?.restored || false,
     monitoring: this.metadata.get(deviceId)?.monitoring || { enabled: false } }; }
+  getShipmentTimeline(shipmentId) {
+    const devices = [...this.memory.simulators.values()]
+      .filter(simulator => simulator.config.shipmentId === shipmentId)
+      .map(simulator => ({ deviceId: simulator.config.deviceId, batchId: simulator.config.batchId,
+        nextTimestamp: simulator.getStatus().nextTimestamp,
+        temperature: simulator.lastReading?.temperature, humidity: simulator.lastReading?.humidity }))
+      .sort((a, b) => a.deviceId.localeCompare(b.deviceId));
+    if (!devices.length) throw Object.assign(new Error("Create a virtual device linked to this shipment before applying an override"), { status: 409 });
+    return { shipmentId, batchId: devices[0].batchId,
+      eventTime: new Date(Math.max(...devices.map(device => +new Date(device.nextTimestamp)))), devices };
+  }
   getAllStatuses() { return [...this.memory.simulators.keys()].map(id => this.getStatus(id)); }
   clear() { this.memory.clear(); this.metadata.clear(); this.loaded = false; }
 }

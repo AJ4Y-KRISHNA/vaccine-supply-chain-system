@@ -24,6 +24,8 @@ Existing fields remain unchanged: `shipmentId`, `batchId`, `sensorId`, `temperat
 | `location.lat`, `location.lng` | Simulated GPS location. |
 | `simulation` | Source (`software-iot-simulator`), scenario, seed, and tick number. |
 
+Simulator-produced `TemperatureLog` documents also have optional top-level `source`, `overrideId`, and `operatorUserId` provenance. `source` is `auto-simulated` or `manual-override`; the nested `simulation.source` remains `software-iot-simulator` for existing integrations. Legacy temperature-ingestion payloads are unchanged.
+
 The existing `POST /api/temperature/ingest` request still accepts the original minimal payload; it now also accepts these telemetry fields as optional fields. Its API-key requirement and response format are unchanged.
 
 When a reading has a device or sensor ID, batch ID, valid timestamp, and non-negative integer sequence number, persistence derives a stable key from those four values. MongoDB enforces uniqueness with a sparse unique index on that key. A retry with the same identity returns the existing `TemperatureLog` instead of appending another; changing the sequence number represents a distinct reading. Simulator ticks use their existing tick number, without changing the simulator seed or clock behavior. Legacy ingestion payloads without a complete identity remain accepted and do not receive this deduplication guarantee.
@@ -65,6 +67,26 @@ All `/api/simulator/*` endpoints require a signed JWT and a current database acc
 | `GET /api/simulator/inputs` | Scoped batch/shipment options and supported scenarios. |
 | `POST /api/simulator/:deviceId/monitor` | Arm/pause `{ "enabled": true }` silence monitoring; optional explicit `asOf` clock anchor. |
 
+## Manual sensor overrides (backend phase)
+
+Manual overrides are a separate, synthetic-only control path. The default is **disabled**: set `SIMULATOR_MANUAL_OVERRIDES_ENABLED=true` in the backend environment only for a local demo. The maximum lifetime defaults to 24 hours and may be lowered with `SIMULATOR_OVERRIDE_MAX_TTL_MS`; the default lifetime is 30 minutes and may be changed with `SIMULATOR_OVERRIDE_DEFAULT_TTL_MS`. The maximum is hard-capped at 24 hours. Time-to-live and hold/ramp durations use the virtual shipment clock, not wall-clock time; an override expires when a subsequent simulator tick reaches its configured expiry or behavior end.
+
+Every manual override endpoint requires a current signed **admin** identity. Manufacturer and other roles are rejected in this phase. Each shipment can have only one active override; it must already have a virtual device linked to that shipment. New data is bounded to -40..60°C and 0..100% humidity. A custom override needs at least one target and a reason. Hold applies the target with deterministic bounded noise; ramp moves linearly from each device's current value to its target, then holds. A seeded hash of the simulator seed, override ID, measurement name, and simulation timestamp supplies noise without consuming or changing the existing automatic PRNG sequence. Thus, an automatic device with the same seed and clock keeps the same generated values, including after a manual period.
+
+Available presets come from `backend/services/simulatorOverrides.js`: Refrigeration failure, Door left open, Freezing risk, Low humidity, and Sensor fault. Presets are synthetic examples, not approved vaccine storage policies. Sensor fault suppresses the measured sample and invokes the existing missing-telemetry policy check; it does not create an alert directly. Temperature/humidity values still pass through `persistSimulationReading` and the existing policy evaluator, which remains the only component that creates cold-chain alerts or holds.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/simulator/presets` | Read the data-driven scenario presets and configured expiry limits. |
+| `GET /api/simulator/overrides?shipmentId=...&status=ACTIVE` | List active and historical override records (`status` can be `ACTIVE`, `RELEASED`, `EXPIRED`, or `ALL`). |
+| `POST /api/simulator/overrides` | Start a manual override for an existing shipment/device. Provide either `presetId` or `targetTemperature` and/or `targetHumidity`, plus a reason for custom inputs. Optional controls: `behavior`, `rampDuration`, `holdDuration`, and `expiresInMs`. Durations are in simulated minutes; expiry is in milliseconds. |
+| `PATCH /api/simulator/overrides/:id` | Change an active override. A new reason is required. Omitted target values remain unchanged unless a preset is selected. |
+| `DELETE /api/simulator/overrides/:id` | Return to automatic mode immediately. Optional body: `{ "reason": "..." }`. Repeated release is idempotent. |
+
+Create, change, release, and expiry produce immutable `SimulatorOverrideAudit` records with the admin/system actor, shipment and batch, values, reason, and a simulation-clock `eventTime`. The normal record's wall-clock `recordedAt` is retained for audit operations. Simulator ticks and override actions use the same existing in-process per-batch lock through telemetry persistence and policy evaluation; a tick already in flight completes as one ordered operation before a concurrent override takes effect. This matches the existing single-process lock limitation and is not a distributed lock.
+
+This phase adds backend APIs only. The web control console is a later phase and must also be hidden unless `SIMULATOR_MANUAL_OVERRIDES_ENABLED=true`.
+
 Example create request:
 
 ```json
@@ -105,10 +127,11 @@ cd backend
 npm test
 ```
 
-Tests cover deterministic seeded readings, exact snapshot restoration, pending retry, all scenarios, lifecycle controls, authorization, telemetry mapping, legacy ingestion, and monitoring. Database suites create isolated random local test databases, never reseed the application database.
+Tests cover deterministic seeded readings, exact snapshot restoration, pending retry, all scenarios, lifecycle controls, authorization, telemetry mapping, legacy ingestion, monitoring, manual override bounds/roles/source/audit/expiry, the existing policy engine integration, automatic-sequence regression, and tick-versus-override lock ordering. Database suites create isolated random local test databases, never reseed the application database.
 
 ## Current limitations
 
 - Schedules are single-process and deliberately restore stopped; configuration and pending readings are durable. Do not run multiple backend workers against these devices.
+- Manual override state and audit history are database-backed, but lock serialization is process-local. Use one backend process only; this is demo tooling, not a physical sensor-control interface. A paused virtual clock also pauses expiry until a later tick.
 - The subsequent extension evaluates readings and creates application notifications, but adds no blockchain writes, hardware integrations or forecast changes.
 - Missing telemetry uses event/simulation time. For complete silence, use `/api/alerts/telemetry/check` or explicitly arm a device monitor. Armed monitors advance a separate anchored simulation clock using elapsed wall time and check every five seconds, including after restart. They detect a missing first expected reading without inventing a measured sample. Stop/reset does not pause monitoring or clear holds. Pause monitoring intentionally; recovery requires a fresh reading on the advanced clock. Historical seeds are never automatically interpreted as current wall time.

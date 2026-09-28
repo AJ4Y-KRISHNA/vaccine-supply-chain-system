@@ -26,7 +26,9 @@ async function notify(alert, stage) {
       title: `Application Notification: ${stage.replaceAll("_", " ")}`,
       message: `${alert.batchId}: ${alert.reason} ${alert.recommendedAction}`,
       type: stage === "QUARANTINED" ? "error" : "info",
-      metadata: { source: alert.context?.source, stage, simulated: alert.context?.source === "software-iot-simulator", alertId: alert.alertId },
+      metadata: { source: alert.context?.source, stage,
+        simulated: ["software-iot-simulator", "auto-simulated", "manual-override"].includes(alert.context?.source),
+        overrideId: alert.context?.overrideId, alertId: alert.alertId },
     } }, { upsert: true });
   }
   alert.notificationTargets = [...new Set([...(alert.notificationTargets || []), ...unique.map(r => `${r.recipientRole}:${r.recipientRefKey || "all"}`)])];

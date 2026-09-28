@@ -251,13 +251,19 @@ class SimulatorManager {
     return simulator;
   }
 
-  async tickOnce(deviceId, persistReading) {
+  async tickOnce(deviceId, persistReading, transformReading) {
     const simulator = this.getSimulator(deviceId);
     if (this.busy.has(deviceId)) throw Object.assign(new Error("A tick is still being persisted"), { status: 409 });
     this.busy.add(deviceId);
-    const reading = this.pending.get(deviceId) || simulator.tick();
+    let reading = this.pending.get(deviceId) || simulator.tick();
     this.pending.set(deviceId, reading);
     try {
+      // Transform only newly generated or not-yet-tagged legacy pending readings.
+      // Once tagged, a retry reuses exactly the same serialized sample.
+      if (transformReading && !["auto-simulated", "manual-override"].includes(reading.source)) {
+        reading = await transformReading(reading);
+        this.pending.set(deviceId, reading);
+      }
       const persistedReading = persistReading ? await persistReading(reading) : null;
       this.pending.delete(deviceId);
       this.errors.delete(deviceId);
