@@ -85,7 +85,7 @@ Available presets come from `backend/services/simulatorOverrides.js`: Refrigerat
 
 Create, change, release, and expiry produce immutable `SimulatorOverrideAudit` records with the admin/system actor, shipment and batch, values, reason, and a simulation-clock `eventTime`. The normal record's wall-clock `recordedAt` is retained for audit operations. Simulator ticks and override actions use the same existing in-process per-batch lock through telemetry persistence and policy evaluation; a tick already in flight completes as one ordered operation before a concurrent override takes effect. This matches the existing single-process lock limitation and is not a distributed lock.
 
-This phase adds backend APIs only. The web control console is a later phase and must also be hidden unless `SIMULATOR_MANUAL_OVERRIDES_ENABLED=true`.
+The admin-only React control console is documented in [MANUAL_SIMULATOR_CONSOLE.md](MANUAL_SIMULATOR_CONSOLE.md). It requires both backend `SIMULATOR_MANUAL_OVERRIDES_ENABLED=true` and frontend build-time `REACT_APP_SIMULATOR_MANUAL_OVERRIDES_ENABLED=true`; both default to disabled unless explicitly configured for a local demo.
 
 Example create request:
 
@@ -118,7 +118,7 @@ cd backend
 npm start
 ```
 
-Admin and Manufacturer dashboards include device creation, scenario selection, start/stop/tick/reset, persistence errors and monitor controls. Status refreshes every five seconds. The frontend API client helpers are in `frontend/src/services/simulator.js`. A manual tick creates one `TemperatureLog` record when MongoDB is available.
+Admin and Manufacturer dashboards include device creation, scenario selection, start/stop/tick/reset, persistence errors and monitor controls. Status refreshes every five seconds. The frontend API client helpers are in `frontend/src/services/simulator.js`. A manual tick creates one `TemperatureLog` record when MongoDB is available. The separate admin-only manual override page is `/admin/manual-simulator`, when both feature flags are enabled; see [MANUAL_SIMULATOR_CONSOLE.md](MANUAL_SIMULATOR_CONSOLE.md) for its workflow and limitations.
 
 Run the backend tests with:
 

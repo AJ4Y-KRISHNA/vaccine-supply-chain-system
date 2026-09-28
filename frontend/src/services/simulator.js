@@ -42,3 +42,23 @@ export const fetchSimulatorStatuses = async () => {
   const response = await API.get("/simulator/status");
   return response.data;
 };
+
+export const fetchManualSimulatorPresets = async () =>
+  (await API.get("/simulator/presets")).data;
+
+export const fetchManualSimulatorOverrides = async ({ shipmentId, status = "ALL", limit = 50 } = {}) => {
+  const params = new URLSearchParams();
+  if (shipmentId) params.set("shipmentId", shipmentId);
+  params.set("status", status);
+  params.set("limit", String(limit));
+  return (await API.get(`/simulator/overrides?${params.toString()}`)).data;
+};
+
+export const createManualSimulatorOverride = async (payload) =>
+  (await API.post("/simulator/overrides", payload)).data;
+
+export const updateManualSimulatorOverride = async (overrideId, payload) =>
+  (await API.patch(`/simulator/overrides/${encodeURIComponent(overrideId)}`, payload)).data;
+
+export const releaseManualSimulatorOverride = async (overrideId, payload = {}) =>
+  (await API.delete(`/simulator/overrides/${encodeURIComponent(overrideId)}`, { data: payload })).data;

@@ -7,8 +7,10 @@ import ManufacturerDashboard from "./pages/ManufacturerDashboard";
 import DistributorDashboard from "./pages/DistributorDashboard";
 import HospitalDashboard from "./pages/HospitalDashboard";
 import ArchitectureStatus from "./pages/ArchitectureStatus";
+import ManualSimulatorConsole from "./pages/ManualSimulatorConsole";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { ToastProvider } from "./components/Toast";
+import { manualSimulatorConsoleEnabled } from "./config/features";
 
 function App() {
   return (
@@ -25,6 +27,16 @@ function App() {
               </ProtectedRoute>
             }
           />
+          {manualSimulatorConsoleEnabled ? (
+            <Route
+              path="/admin/manual-simulator"
+              element={
+                <ProtectedRoute allowed={["Admin"]}>
+                  <ManualSimulatorConsole />
+                </ProtectedRoute>
+              }
+            />
+          ) : null}
           <Route
             path="/manufacturer"
             element={

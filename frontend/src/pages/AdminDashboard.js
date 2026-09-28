@@ -39,6 +39,7 @@ import SimulatorPanel from "../components/SimulatorPanel";
 import SupplyPlannerPanel from "../components/Admin/SupplyPlannerPanel";
 import ForecastExplanation from "../components/ForecastExplanation";
 import OrderAllocationFields from "../components/Admin/OrderAllocationFields";
+import { manualSimulatorConsoleEnabled } from "../config/features";
 import {
   fetchAdminMonitoring,
   fetchAdminOrders,
@@ -549,6 +550,7 @@ const AdminDashboard = () => {
               <MessageSquareText size={15} />
               <span>Sentiment</span>
             </button>
+            {manualSimulatorConsoleEnabled ? <Link to="/admin/manual-simulator" className="flex items-center gap-2 rounded-lg px-3 py-3 hover:bg-white/10"><Thermometer size={15} /><span>Manual Sensor Console</span></Link> : null}
             <Link to="/" className="flex items-center gap-2 rounded-lg px-3 py-3 hover:bg-white/10">
               <LogOut size={15} />
               <span>Logout</span>
