@@ -17,8 +17,11 @@ function normalizeTelemetry(payload, fallbackClock = null) {
     temperature: finiteOrNull(payload.temperature),
     humidity: finiteOrNull(payload.humidity),
     battery: finiteOrNull(payload.battery ?? payload.batteryLevel),
+    speed: finiteOrNull(payload.speed ?? payload.speedKph),
     gpsLat: finiteOrNull(payload.gpsLat ?? location.lat ?? payload.latitude),
     gpsLng: finiteOrNull(payload.gpsLng ?? location.lng ?? payload.longitude),
+    vehicleId: typeof payload.vehicleId === "string" ? payload.vehicleId : null,
+    deviceId: typeof payload.deviceId === "string" ? payload.deviceId : null,
     source: typeof payload.source === "string" ? payload.source : "unknown",
     simulationClock:
       payload.simulationClock || payload.recordedAt || payload.timestamp || fallbackClock || null,

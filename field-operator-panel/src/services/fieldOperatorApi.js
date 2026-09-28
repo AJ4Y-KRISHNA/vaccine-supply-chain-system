@@ -47,3 +47,16 @@ export async function listInTransitShipments(token, { signal } = {}) {
       .includes("transit"),
   );
 }
+
+/**
+ * The simulator status route is intentionally restricted by the backend to
+ * admin/manufacturer identities. Its persisted device config is the current
+ * authoritative source for the synthetic GPS polyline.
+ */
+export async function getSimulatorRoutes(token, { signal } = {}) {
+  const result = await request("/simulator/status", { token, signal });
+  if (!Array.isArray(result.simulations)) {
+    throw new Error("The backend returned an unexpected simulator status.");
+  }
+  return result.simulations;
+}

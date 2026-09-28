@@ -1,7 +1,6 @@
-import React from "react";
+import React, { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import {
   Activity,
-  Battery,
   Bell,
   Clock3,
   Droplets,
@@ -17,7 +16,21 @@ import {
 import TruckRoadScene from "./components/TruckRoadScene.jsx";
 import ShipmentAccessPanel from "./components/ShipmentAccessPanel.jsx";
 import useFieldOperatorSocket from "./hooks/useFieldOperatorSocket.js";
+import { getSimulatorRoutes } from "./services/fieldOperatorApi.js";
 import { useFieldOperatorStore } from "./stores/fieldOperatorStore.js";
+import {
+  etaMinutes,
+  formatCoordinate,
+  formatEta,
+  normalizeCoordinate,
+  normalizeRoutePoints,
+  routeDistanceKm,
+  routePointsFromInit,
+  simulatedSpeedKph,
+} from "./utils/routeData.js";
+
+const ShipmentMap = lazy(() => import("./components/ShipmentMap.jsx"));
+const TelemetryGauges = lazy(() => import("./components/TelemetryGauges.jsx"));
 
 const sections = [
   { number: "01", title: "Truck scene", subtitle: "Shipment and cold-chain state", icon: Truck },
@@ -49,7 +62,7 @@ const sections = [
   },
 ];
 
-function SectionHeading({ number, title, subtitle, icon: Icon }) {
+function SectionHeading({ number, title, subtitle, icon: Icon, state = "Awaiting data" }) {
   return (
     <div className="mb-5 flex items-start gap-3">
       <div className="mt-0.5 rounded-input border border-border bg-surface-raised p-2 text-primary">
@@ -64,8 +77,8 @@ function SectionHeading({ number, title, subtitle, icon: Icon }) {
         </div>
         <p className="mt-1 text-sm text-text-secondary">{subtitle}</p>
       </div>
-      <span className="rounded-pill border border-border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.14em] text-text-muted">
-        Awaiting data
+      <span className="rounded-pill border border-border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.14em] text-text-secondary">
+        {state}
       </span>
     </div>
   );
@@ -81,31 +94,103 @@ function Placeholder({ children, className = "" }) {
   );
 }
 
-function ReadingTile({ label, icon: Icon, unit }) {
+function RouteDatum({ label, value = "Unavailable" }) {
   return (
-    <div className="operator-panel-raised p-4">
-      <div className="flex items-center gap-2 text-text-secondary">
-        <Icon aria-hidden="true" className="h-4 w-4 text-primary" />
-        <span className="text-sm">{label}</span>
-      </div>
-      <p
-        className="operator-mono mt-4 text-2xl font-medium text-text-muted"
-        aria-label={`${label}: no reading yet`}
-      >
-        — <span className="text-sm text-text-muted">{unit}</span>
-      </p>
-      <p className="mt-1 text-xs text-text-muted">No sensor sample received</p>
+    <div className="border-b border-border/70 py-3 last:border-0">
+      <p className="text-xs uppercase tracking-wide text-text-muted">{label}</p>
+      <p className="operator-mono mt-1 break-words text-sm text-text-primary">{value}</p>
     </div>
   );
 }
 
-function RouteDatum({ label }) {
-  return (
-    <div className="border-b border-border/70 py-3 last:border-0">
-      <p className="text-xs uppercase tracking-wide text-text-muted">{label}</p>
-      <p className="operator-mono mt-1 text-sm text-text-muted">—</p>
-    </div>
-  );
+function finite(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeRestTelemetry(reading) {
+  if (!reading) return null;
+  const location = reading.location || {};
+  return {
+    temperature: finite(reading.temperature),
+    humidity: finite(reading.humidity),
+    battery: finite(reading.battery ?? reading.batteryLevel),
+    speed: finite(reading.speed ?? reading.speedKph),
+    gpsLat: finite(reading.gpsLat ?? location.lat ?? reading.latitude),
+    gpsLng: finite(reading.gpsLng ?? location.lng ?? reading.longitude),
+    vehicleId: reading.vehicleId || null,
+    deviceId: reading.deviceId || null,
+    simulationClock: reading.simulationClock || reading.recordedAt || reading.timestamp || null,
+    source: reading.source || "unknown",
+  };
+}
+
+function resolvePolicy(shipment, initMessage) {
+  const saved = shipment?.policy || {};
+  const live = initMessage?.policyLimits || {};
+  return {
+    minimumTemperature: finite(live.tempMin ?? live.minimumTemperature ?? saved.minimumTemperature),
+    maximumTemperature: finite(live.tempMax ?? live.maximumTemperature ?? saved.maximumTemperature),
+    minimumHumidity: finite(live.humidityMin ?? live.minimumHumidity ?? saved.minimumHumidity),
+    maximumHumidity: finite(live.humidityMax ?? live.maximumHumidity ?? saved.maximumHumidity),
+    criticalBatteryPercent: finite(live.criticalBatteryPercent ?? saved.criticalBatteryPercent),
+    approvedAt: live.approvedAt || saved.approvedAt || null,
+    sourceReference: live.sourceReference || saved.sourceReference || null,
+  };
+}
+
+function resolveStatusColor(status, telemetry, policy, shipment) {
+  const trustedStatus = status && status !== "unknown" ? status : null;
+  const statusText = String(
+    trustedStatus || shipment?.coldChainStatus || shipment?.batchColdChainStatus || "",
+  )
+    .trim()
+    .toLowerCase();
+  if (
+    statusText.includes("quarantin") ||
+    statusText.includes("critical") ||
+    shipment?.coldChainHoldAlertIds?.length ||
+    shipment?.batchColdChainHoldAlertIds?.length
+  )
+    return "red";
+  if (
+    statusText.includes("review") ||
+    statusText.includes("warning") ||
+    statusText.includes("excursion")
+  )
+    return "amber";
+
+  const hasTemperaturePolicy =
+    policy.minimumTemperature !== null && policy.maximumTemperature !== null;
+  const hasHumidityPolicy = policy.minimumHumidity !== null && policy.maximumHumidity !== null;
+  if (!telemetry || (!hasTemperaturePolicy && !hasHumidityPolicy)) return "unknown";
+  const outsideTemperature =
+    hasTemperaturePolicy &&
+    telemetry.temperature !== null &&
+    (telemetry.temperature < policy.minimumTemperature ||
+      telemetry.temperature > policy.maximumTemperature);
+  const outsideHumidity =
+    hasHumidityPolicy &&
+    telemetry.humidity !== null &&
+    (telemetry.humidity < policy.minimumHumidity || telemetry.humidity > policy.maximumHumidity);
+  const criticallyLowBattery =
+    policy.criticalBatteryPercent !== null &&
+    telemetry.battery !== null &&
+    telemetry.battery <= policy.criticalBatteryPercent;
+  if (outsideTemperature || outsideHumidity || criticallyLowBattery) return "amber";
+  if (
+    (hasTemperaturePolicy && telemetry.temperature !== null) ||
+    (hasHumidityPolicy && telemetry.humidity !== null)
+  )
+    return "green";
+  return "unknown";
+}
+
+function formatReadingTime(value) {
+  if (!value) return "Unavailable";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
 const CONNECTION_PRESENTATION = {
@@ -129,6 +214,7 @@ const CONNECTION_PRESENTATION = {
 
 function App() {
   const accessToken = useFieldOperatorStore((state) => state.accessToken);
+  const role = useFieldOperatorStore((state) => state.role);
   const selectedShipmentId = useFieldOperatorStore((state) => state.selectedShipmentId);
   const shipments = useFieldOperatorStore((state) => state.shipments);
   const shipmentLoadStatus = useFieldOperatorStore((state) => state.shipmentLoadStatus);
@@ -136,9 +222,116 @@ function App() {
   const reconnectAttempt = useFieldOperatorStore((state) => state.reconnectAttempt);
   const connectionError = useFieldOperatorStore((state) => state.connectionError);
   const simulationClock = useFieldOperatorStore((state) => state.simulationClock);
-  const selectedShipmentIsAvailable =
-    shipmentLoadStatus === "ready" &&
-    shipments.some((shipment) => shipment.shipmentId === selectedShipmentId);
+  const telemetry = useFieldOperatorStore((state) => state.telemetry);
+  const readingHistory = useFieldOperatorStore((state) => state.readingHistory);
+  const progress = useFieldOperatorStore((state) => state.progress);
+  const coldChainStatus = useFieldOperatorStore((state) => state.coldChainStatus);
+  const initMessage = useFieldOperatorStore((state) => state.initMessage);
+  const [simulatorRouteState, setSimulatorRouteState] = useState({
+    status: "idle",
+    points: [],
+    running: null,
+  });
+  const selectedShipment =
+    shipments.find((shipment) => shipment.shipmentId === selectedShipmentId) || null;
+  const selectedShipmentIsAvailable = shipmentLoadStatus === "ready" && Boolean(selectedShipment);
+
+  const restTelemetry = useMemo(
+    () => normalizeRestTelemetry(selectedShipment?.latestTelemetry),
+    [selectedShipment],
+  );
+  const displayedTelemetry = telemetry || restTelemetry;
+  const policy = useMemo(
+    () => resolvePolicy(selectedShipment, initMessage),
+    [initMessage, selectedShipment],
+  );
+  const serverRouteInfo = initMessage?.routeInfo || {};
+  const serverRoutePoints = useMemo(() => routePointsFromInit(serverRouteInfo), [serverRouteInfo]);
+  const simulatorRoutePoints = simulatorRouteState.points;
+  const routePoints = serverRoutePoints.length ? serverRoutePoints : simulatorRoutePoints;
+  const routeSource = serverRoutePoints.length
+    ? "backend"
+    : simulatorRoutePoints.length
+      ? "simulator"
+      : "unavailable";
+  const normalizedCurrentLocation = normalizeCoordinate({
+    latitude: displayedTelemetry?.gpsLat,
+    longitude: displayedTelemetry?.gpsLng,
+  });
+  const totalDistanceKm = finite(serverRouteInfo.totalDistanceKm) ?? routeDistanceKm(routePoints);
+  const currentProgress = finite(progress ?? displayedTelemetry?.progress);
+  const historyForSpeed = readingHistory.length
+    ? readingHistory
+    : displayedTelemetry
+      ? [displayedTelemetry]
+      : [];
+  const speedKph = finite(displayedTelemetry?.speed) ?? simulatedSpeedKph(historyForSpeed);
+  const remainingDistanceKm =
+    totalDistanceKm !== null && currentProgress !== null
+      ? Math.max(0, totalDistanceKm * (1 - Math.min(100, Math.max(0, currentProgress)) / 100))
+      : null;
+  const eta = etaMinutes(totalDistanceKm, currentProgress, speedKph);
+  const statusColor = resolveStatusColor(
+    coldChainStatus,
+    displayedTelemetry,
+    policy,
+    selectedShipment,
+  );
+  const isQuarantined = statusColor === "red";
+  const isMoving = isQuarantined
+    ? false
+    : simulatorRouteState.running !== null
+      ? simulatorRouteState.running
+      : speedKph !== null && speedKph > 0.5;
+  const hasRouteCoordinates = routePoints.length >= 2;
+  const originLabel =
+    serverRouteInfo.origin ||
+    selectedShipment?.source ||
+    (hasRouteCoordinates ? "Configured route start" : "Origin unavailable");
+  const destinationLabel =
+    serverRouteInfo.destination ||
+    selectedShipment?.destination ||
+    (hasRouteCoordinates ? "Configured route destination" : "Destination unavailable");
+  const weatherState = ["clear", "heat", "rain", "cold"].includes(
+    serverRouteInfo.weatherState || initMessage?.currentState?.weatherState,
+  )
+    ? serverRouteInfo.weatherState || initMessage.currentState.weatherState
+    : "clear";
+
+  useEffect(() => {
+    if (!accessToken || !selectedShipmentIsAvailable || !["admin", "manufacturer"].includes(role)) {
+      setSimulatorRouteState({ status: "unavailable", points: [], running: null });
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setSimulatorRouteState({ status: "loading", points: [], running: null });
+    getSimulatorRoutes(accessToken, { signal: controller.signal })
+      .then((simulations) => {
+        if (controller.signal.aborted) return;
+        const matchingDevice = simulations.find(
+          (simulation) => simulation.shipmentId === selectedShipmentId,
+        );
+        const points = normalizeRoutePoints(matchingDevice?.route || matchingDevice?.config?.route);
+        setSimulatorRouteState({
+          status: points.length ? "ready" : "empty",
+          points,
+          running: typeof matchingDevice?.running === "boolean" ? matchingDevice.running : null,
+          deviceId: matchingDevice?.deviceId || null,
+        });
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setSimulatorRouteState({
+          status: "error",
+          points: [],
+          running: null,
+          error: error.message,
+        });
+      });
+
+    return () => controller.abort();
+  }, [accessToken, role, selectedShipmentId, selectedShipmentIsAvailable]);
 
   useFieldOperatorSocket({
     shipmentId: selectedShipmentIsAvailable ? selectedShipmentId : "",
@@ -152,7 +345,7 @@ function App() {
     : !selectedShipmentIsAvailable
       ? "Choose an accessible in-transit shipment to start its live connection."
       : connectionStatus === "connected"
-        ? "Shipment selected. Live connection established; telemetry widgets are ready for the next integration step."
+        ? "Shipment selected. Live simulated telemetry is connected."
         : connectionStatus === "reconnecting"
           ? `Live connection interrupted. Reconnecting (attempt ${reconnectAttempt})…`
           : "Shipment selected. Waiting for the backend live connection.";
@@ -239,25 +432,45 @@ function App() {
             aria-labelledby="section-01"
             className="operator-panel-surface p-5 sm:p-6 xl:col-span-12"
           >
-            <SectionHeading {...sections[0]} />
+            <SectionHeading
+              {...sections[0]}
+              state={displayedTelemetry ? "Telemetry loaded" : "Waiting for telemetry"}
+            />
             <TruckRoadScene
-              statusColor="unknown"
-              temperature={null}
-              humidity={null}
-              speed={null}
-              isMoving={false}
-              isQuarantined={false}
-              progress={null}
-              weatherState="clear"
+              statusColor={statusColor}
+              temperature={displayedTelemetry?.temperature}
+              humidity={displayedTelemetry?.humidity}
+              speed={speedKph ?? 0}
+              isMoving={isMoving && speedKph !== null && speedKph > 0}
+              isQuarantined={isQuarantined}
+              progress={currentProgress ?? 0}
+              weatherState={weatherState}
+              totalDistanceKm={totalDistanceKm}
+              originLabel={originLabel}
+              destinationLabel={destinationLabel}
+              etaLabel={formatEta(eta)}
             />
             <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {["Shipment", "Batch", "Vehicle", "Progress"].map((label) => (
+              {[
+                ["Shipment", selectedShipment?.shipmentId],
+                ["Batch", selectedShipment?.batchId],
+                ["Vehicle", displayedTelemetry?.vehicleId || simulatorRouteState.deviceId],
+                [
+                  "Route progress",
+                  currentProgress === null ? null : `${currentProgress.toFixed(0)}%`,
+                ],
+              ].map(([label, value]) => (
                 <div
                   key={label}
                   className="rounded-input border border-border bg-background/60 px-3 py-2.5"
                 >
                   <p className="text-[10px] uppercase tracking-wide text-text-muted">{label}</p>
-                  <p className="operator-mono mt-1 truncate text-xs text-text-muted">—</p>
+                  <p
+                    className="operator-mono mt-1 truncate text-xs text-text-primary"
+                    title={value || "Unavailable"}
+                  >
+                    {value || "Unavailable"}
+                  </p>
                 </div>
               ))}
             </div>
@@ -267,19 +480,26 @@ function App() {
             aria-labelledby="section-02"
             className="operator-panel-surface p-5 sm:p-6 xl:col-span-12"
           >
-            <SectionHeading {...sections[1]} />
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <ReadingTile label="Temperature" icon={Thermometer} unit="°C" />
-              <ReadingTile label="Humidity" icon={Droplets} unit="% RH" />
-              <ReadingTile label="Battery" icon={Battery} unit="%" />
-            </div>
-            <div className="mt-4 rounded-input border border-border bg-background/60 px-4 py-3">
-              <div className="flex items-center justify-between gap-3 text-xs">
-                <span className="text-text-secondary">Approved policy range</span>
-                <span className="operator-mono text-text-muted">Unavailable</span>
-              </div>
-              <p className="mt-2 text-xs leading-5 text-text-muted">
-                Limits will be shown only when an approved batch policy is available.
+            <SectionHeading
+              {...sections[1]}
+              state={displayedTelemetry ? "Latest sample" : "No sample yet"}
+            />
+            <Suspense
+              fallback={<Placeholder className="min-h-40">Loading sensor gauges…</Placeholder>}
+            >
+              <TelemetryGauges telemetry={displayedTelemetry} policy={policy} />
+            </Suspense>
+            <div className="mt-4 flex flex-col gap-2 rounded-input border border-border bg-background/60 px-4 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-text-secondary">
+                {policy.approvedAt
+                  ? `Batch policy provided${policy.sourceReference ? ` · ${policy.sourceReference}` : ""}`
+                  : "No approved batch policy was returned; gauges do not imply a safe range."}
+              </p>
+              <p
+                className="operator-mono text-text-muted"
+                title={displayedTelemetry?.simulationClock || ""}
+              >
+                Last sample: {formatReadingTime(displayedTelemetry?.simulationClock)}
               </p>
             </div>
           </section>
@@ -288,26 +508,48 @@ function App() {
             aria-labelledby="section-03"
             className="operator-panel-surface p-5 sm:p-6 xl:col-span-12"
           >
-            <SectionHeading {...sections[2]} />
-            <div className="relative min-h-[240px] overflow-hidden rounded-input border border-border bg-background p-4 sm:min-h-[320px]">
-              <div
-                aria-hidden="true"
-                className="absolute inset-0 opacity-30"
-                style={{
-                  backgroundImage:
-                    "linear-gradient(30deg, transparent 48%, #1E3A5F 49%, #1E3A5F 50%, transparent 51%), linear-gradient(150deg, transparent 48%, #1E3A5F 49%, #1E3A5F 50%, transparent 51%)",
-                  backgroundSize: "92px 92px",
-                }}
-              />
-              <div className="relative flex min-h-[208px] items-center justify-center sm:min-h-[288px]">
-                <Placeholder className="max-w-sm bg-surface/95">
-                  <MapPin aria-hidden="true" className="mb-3 h-7 w-7 text-text-muted" />
-                  Map position will appear after GPS telemetry arrives.
+            <SectionHeading
+              {...sections[2]}
+              state={
+                routePoints.length
+                  ? "Route loaded"
+                  : normalizedCurrentLocation
+                    ? "GPS received"
+                    : "Waiting for GPS"
+              }
+            />
+            <Suspense
+              fallback={
+                <Placeholder className="min-h-[240px] sm:min-h-[320px]">
+                  Loading simulated route map…
                 </Placeholder>
-              </div>
-              <span className="absolute bottom-3 left-3 rounded-pill border border-accent/30 bg-background/90 px-2.5 py-1 text-[10px] text-accent">
-                Simulated GPS · not live vehicle tracking
+              }
+            >
+              <ShipmentMap
+                currentLocation={normalizedCurrentLocation}
+                routePoints={routePoints}
+                routeSource={routeSource}
+                statusColor={statusColor}
+                originLabel={originLabel}
+                destinationLabel={destinationLabel}
+              />
+            </Suspense>
+            {simulatorRouteState.status === "error" && ["admin", "manufacturer"].includes(role) && (
+              <p
+                className="mt-3 rounded-input border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning"
+                role="status"
+              >
+                Configured simulator route could not be loaded: {simulatorRouteState.error}
+              </p>
+            )}
+            <div className="mt-3 flex flex-col gap-1 text-xs text-text-muted sm:flex-row sm:items-center sm:justify-between">
+              <span>
+                Current GPS:{" "}
+                {normalizedCurrentLocation
+                  ? formatCoordinate(normalizedCurrentLocation)
+                  : "Unavailable"}
               </span>
+              <span>GPS timestamp: {formatReadingTime(displayedTelemetry?.simulationClock)}</span>
             </div>
           </section>
 
@@ -315,17 +557,39 @@ function App() {
             aria-labelledby="section-04"
             className="operator-panel-surface p-5 sm:p-6 xl:col-span-5"
           >
-            <SectionHeading {...sections[3]} />
+            <SectionHeading
+              {...sections[3]}
+              state={totalDistanceKm !== null ? "Route estimate" : "Route unavailable"}
+            />
             <div className="rounded-input border border-border bg-background/60 px-4">
-              <RouteDatum label="Origin" />
-              <RouteDatum label="Destination" />
+              <RouteDatum label="Origin" value={originLabel} />
+              <RouteDatum label="Destination" value={destinationLabel} />
               <div className="grid grid-cols-2 gap-4">
-                <RouteDatum label="Distance remaining" />
-                <RouteDatum label="Estimated arrival" />
+                <RouteDatum
+                  label="Distance remaining"
+                  value={
+                    remainingDistanceKm === null
+                      ? "Unavailable"
+                      : `${remainingDistanceKm.toFixed(1)} km`
+                  }
+                />
+                <RouteDatum label="Estimated arrival" value={formatEta(eta)} />
+                <RouteDatum
+                  label="Total route distance"
+                  value={
+                    totalDistanceKm === null ? "Unavailable" : `${totalDistanceKm.toFixed(1)} km`
+                  }
+                />
+                <RouteDatum
+                  label="Simulated speed"
+                  value={speedKph === null ? "Unavailable" : `${speedKph.toFixed(1)} km/h`}
+                />
               </div>
             </div>
-            <p className="mt-3 text-xs leading-5 text-text-muted">
-              Route and ETA are unavailable until a shipment and simulated route are provided.
+            <p className="mt-3 text-xs leading-5 text-text-muted" role="note">
+              Estimated from simulated GPS timestamps and reported workflow progress; not live
+              vehicle speed. ETA appears only when route distance, progress, and at least two timed
+              GPS samples are available.
             </p>
           </section>
 

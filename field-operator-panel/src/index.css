@@ -108,6 +108,127 @@ body {
   @apply font-mono;
 }
 
+.field-map-empty {
+  @apply flex min-h-[240px] flex-col items-center justify-center rounded-input border border-dashed border-border bg-background px-5 py-8 text-center sm:min-h-[320px];
+}
+
+.field-map-empty-icon {
+  @apply mb-3 flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface-raised text-2xl text-primary;
+}
+
+.field-operator-map {
+  z-index: 0;
+  width: 100%;
+  height: 240px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-background);
+}
+
+.field-map-icon {
+  border: 0;
+  background: transparent;
+}
+
+.field-map-marker {
+  position: relative;
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: var(--color-background);
+  box-shadow: 0 4px 14px var(--color-scene-shadow);
+}
+
+.field-map-marker::after {
+  position: absolute;
+  z-index: 0;
+  inset: -6px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+  opacity: 0.15;
+}
+
+.field-map-marker svg {
+  position: relative;
+  z-index: 1;
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.field-map-marker--green {
+  color: var(--color-primary);
+}
+
+.field-map-marker--amber {
+  color: var(--color-warning);
+}
+
+.field-map-marker--red {
+  color: var(--color-danger);
+}
+
+.field-map-marker--unknown {
+  color: var(--color-text-secondary);
+}
+
+.field-map-point {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border: 3px solid var(--color-background);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 1px currentColor,
+    0 2px 8px var(--color-scene-shadow);
+}
+
+.field-map-point--origin {
+  color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+.field-map-point--destination {
+  color: var(--color-primary);
+  background: var(--color-primary);
+}
+
+.leaflet-container {
+  color: var(--color-text-primary);
+  font: inherit;
+}
+
+.leaflet-control-attribution {
+  color: var(--color-text-secondary) !important;
+  background: var(--color-background) !important;
+}
+
+.leaflet-control-attribution a {
+  color: var(--color-primary) !important;
+}
+
+.leaflet-control-zoom a {
+  color: var(--color-text-primary) !important;
+  background: var(--color-surface) !important;
+  border-color: var(--color-border) !important;
+}
+
+@media (min-width: 768px) {
+  .field-operator-map {
+    height: 320px;
+  }
+}
+
 @keyframes scene-wheel-rotate {
   from {
     transform: rotate(0deg);
