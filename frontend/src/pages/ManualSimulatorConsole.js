@@ -4,6 +4,7 @@ import { Activity, AlertTriangle, ArrowLeft, Battery, Clock3, Droplets, MapPin, 
 import { manualSimulatorConsoleEnabled } from "../config/features";
 import * as simulator from "../services/simulator";
 import { fetchColdChainPolicy, fetchTemperatureAlerts } from "../services/alerts";
+import LiveShipmentVisualizer from "../components/LiveShipmentVisualizer";
 
 const initialForm = {
   presetId: "", temperatureEnabled: true, humidityEnabled: false,
@@ -295,6 +296,8 @@ export default function ManualSimulatorConsole({ enabled = manualSimulatorConsol
             <span className="text-xs text-slate-500">Policy reference: {policy.sourceReference || "Not recorded"}</span>
           </div> : selectedBatch ? <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">No approved cold-chain policy is attached to this batch. The console will not invent safe limits or allow an override.</p> : null}
         </section>
+
+        {selectedShipment ? <LiveShipmentVisualizer compact shipmentId={shipmentId} maxVisible={1} title="Selected shipment position" /> : null}
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(300px,.85fr)]">
           <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-label="Manual sensor override controls">

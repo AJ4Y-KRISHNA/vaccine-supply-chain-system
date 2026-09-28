@@ -7,6 +7,7 @@ import ManufacturerDashboard from "./pages/ManufacturerDashboard";
 import DistributorDashboard from "./pages/DistributorDashboard";
 import HospitalDashboard from "./pages/HospitalDashboard";
 import ArchitectureStatus from "./pages/ArchitectureStatus";
+import LiveShipmentPage from "./pages/LiveShipmentPage";
 import ManualSimulatorConsole from "./pages/ManualSimulatorConsole";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { ToastProvider } from "./components/Toast";
@@ -19,6 +20,14 @@ function App() {
       <Router>
         <Routes>
           <Route path="/" element={<Login />} />
+          <Route
+            path="/live-shipments"
+            element={
+              <ProtectedRoute allowed={["Admin", "Manufacturer", "Distributor", "Healthcare Professional"]}>
+                <LiveShipmentPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/admin"
             element={

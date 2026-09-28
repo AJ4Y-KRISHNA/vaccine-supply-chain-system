@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import LiveShipmentVisualizer from "../components/LiveShipmentVisualizer";
 import TemperatureAlertPanel from "../components/TemperatureAlertPanel";
 import { Link } from "react-router-dom";
 import {
@@ -342,6 +343,7 @@ function DistributorDashboard() {
               </div>
             </div>
           </div>
+          <div className="mb-6"><LiveShipmentVisualizer compact maxVisible={3} /></div>
 
           <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 mb-6">
             <div className="xl:col-span-3 bg-white rounded-[14px] shadow-sm border border-[#e9eff7] p-5 flex flex-col">

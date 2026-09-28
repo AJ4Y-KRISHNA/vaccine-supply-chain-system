@@ -22,6 +22,7 @@ const orderRoutes = require("./routes/orderRoutes");
 const feedbackRoutes = require("./routes/feedbackRoutes");
 const simulatorRoutes = require("./routes/simulatorRoutes");
 const alertRoutes = require("./routes/alertRoutes");
+const liveShipmentRoutes = require("./routes/liveShipmentRoutes");
 
 const app = express();
 
@@ -60,6 +61,7 @@ app.use("/api/vaccinations", vaccinationRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/temperature", temperatureRoutes);
 app.use("/api/simulator", simulatorRoutes);
+app.use("/api/live-shipments", liveShipmentRoutes);
 app.use("/api/alerts", alertRoutes);
 app.use("/api/manufacturer", manufacturerRoutes);
 app.use("/api/admin", adminRoutes);

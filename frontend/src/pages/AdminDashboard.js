@@ -36,6 +36,7 @@ import { useToast } from "../components/Toast";
 import SentimentFeedbackPanel from "../components/Admin/SentimentFeedbackPanel";
 import TemperatureAlertPanel from "../components/TemperatureAlertPanel";
 import SimulatorPanel from "../components/SimulatorPanel";
+import LiveShipmentVisualizer from "../components/LiveShipmentVisualizer";
 import SupplyPlannerPanel from "../components/Admin/SupplyPlannerPanel";
 import ForecastExplanation from "../components/ForecastExplanation";
 import OrderAllocationFields from "../components/Admin/OrderAllocationFields";
@@ -568,6 +569,8 @@ const AdminDashboard = () => {
               <MetricCard icon={Link2} label="Blockchain Logs" value={summary.blockchainLogs} accent="text-[#d08337]" badge="bg-[#fff1df] text-[#d08337]" />
               <MetricCard icon={Thermometer} label="Temp Alerts" value={summary.tempAlerts} accent="text-[#de6666]" badge="bg-[#fff0f0] text-[#de6666]" />
             </div>
+            <div className="mb-6"><LiveShipmentVisualizer compact maxVisible={3} /></div>
+
 
             <div className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-[0.9fr_1.1fr_0.8fr]" id="admin-monitoring">
               <div className="rounded-[14px] border border-[#e6eef8] bg-white p-5 shadow-sm">
