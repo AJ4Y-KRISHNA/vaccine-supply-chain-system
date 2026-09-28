@@ -162,8 +162,8 @@ function App() {
 
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
           <section
-            aria-labelledby="truck-heading"
-            className="operator-panel-surface p-5 sm:p-6 xl:col-span-7"
+            aria-labelledby="section-01"
+            className="operator-panel-surface p-5 sm:p-6 xl:col-span-12"
           >
             <SectionHeading {...sections[0]} />
             <div className="relative flex min-h-[220px] items-center justify-center overflow-hidden rounded-input border border-border bg-background px-5 py-8 sm:min-h-[280px]">
@@ -194,11 +194,11 @@ function App() {
           </section>
 
           <section
-            aria-labelledby="readings-heading"
-            className="operator-panel-surface p-5 sm:p-6 xl:col-span-5"
+            aria-labelledby="section-02"
+            className="operator-panel-surface p-5 sm:p-6 xl:col-span-12"
           >
             <SectionHeading {...sections[1]} />
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <ReadingTile label="Temperature" icon={Thermometer} unit="°C" />
               <ReadingTile label="Humidity" icon={Droplets} unit="% RH" />
               <ReadingTile label="Battery" icon={Battery} unit="%" />
@@ -215,8 +215,8 @@ function App() {
           </section>
 
           <section
-            aria-labelledby="map-heading"
-            className="operator-panel-surface p-5 sm:p-6 xl:col-span-7"
+            aria-labelledby="section-03"
+            className="operator-panel-surface p-5 sm:p-6 xl:col-span-12"
           >
             <SectionHeading {...sections[2]} />
             <div className="relative min-h-[240px] overflow-hidden rounded-input border border-border bg-background p-4 sm:min-h-[320px]">
@@ -242,7 +242,7 @@ function App() {
           </section>
 
           <section
-            aria-labelledby="route-heading"
+            aria-labelledby="section-04"
             className="operator-panel-surface p-5 sm:p-6 xl:col-span-5"
           >
             <SectionHeading {...sections[3]} />
@@ -260,8 +260,8 @@ function App() {
           </section>
 
           <section
-            aria-labelledby="override-heading"
-            className="operator-panel-surface p-5 sm:p-6 xl:col-span-5"
+            aria-labelledby="section-05"
+            className="operator-panel-surface p-5 sm:p-6 xl:col-span-7"
           >
             <SectionHeading {...sections[4]} />
             <div className="rounded-input border border-warning/30 bg-warning/5 p-4">
@@ -287,8 +287,8 @@ function App() {
           </section>
 
           <section
-            aria-labelledby="alerts-heading"
-            className="operator-panel-surface p-5 sm:p-6 xl:col-span-7"
+            aria-labelledby="section-06"
+            className="operator-panel-surface p-5 sm:p-6 xl:col-span-12"
           >
             <SectionHeading {...sections[5]} />
             <div className="flex items-start gap-3 rounded-input border border-border bg-background/60 p-4">
@@ -314,7 +314,7 @@ function App() {
           </section>
 
           <section
-            aria-labelledby="history-heading"
+            aria-labelledby="section-07"
             className="operator-panel-surface p-5 sm:p-6 xl:col-span-12"
           >
             <SectionHeading {...sections[6]} />
