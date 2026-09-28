@@ -46,6 +46,22 @@ const TemperatureAlertSchema = new mongoose.Schema(
       default: "ACTIVE",
       index: true,
     },
+    // Response state is separate from event status: the policy engine may close a
+    // recovered excursion while a human response still needs to be recorded.
+    responseState: {
+      type: String,
+      enum: ["OPEN", "ACKNOWLEDGED", "ACTION_TAKEN", "RESOLVED"],
+      default: "OPEN",
+      index: true,
+    },
+    acknowledgementNote: String,
+    actionTaken: { type: String, enum: ["inspect", "reroute", "hold", "discard-review"] },
+    actionTakenNote: String,
+    actionTakenBy: String,
+    actionTakenAt: Date,
+    responseResolvedNote: String,
+    responseResolvedBy: String,
+    responseResolvedAt: Date,
     reason: { type: String, required: true },
     latitude: Number,
     longitude: Number,

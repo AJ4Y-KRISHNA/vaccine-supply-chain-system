@@ -105,8 +105,10 @@ async function updateEvent({ reading, state, policy, category, type, reasons, du
     basis: "Rule evidence completeness, not a probability of vaccine safety or an ML score.",
   };
   alert.context = { humidity: reading.humidity, batteryLevel: reading.batteryLevel, rateCelsiusPerMinute: rate,
-    vaccineType: policy.vaccineType, shipmentStatus: shipment?.status || "Unknown", source: reading.source,
-    overrideId: reading.overrideId, operatorUserId: reading.operatorUserId };
+    vaccineType: policy.vaccineType, shipmentStatus: shipment?.status || "Unknown",
+    shipmentId: shipment?.shipmentId || reading.shipmentId || "",
+    distributor: shipment?.distributor || "", hospital: shipment?.destination || "",
+    source: reading.source, overrideId: reading.overrideId, operatorUserId: reading.operatorUserId };
   await alert.save();
   if (created) await audit(alert, "EVENT_OPENED", "SYSTEM", alert.reason, timestamp, { policyId: policy._id, context: alert.context });
   if (sustained) await quarantine(alert, "SYSTEM", alert.reason, timestamp);

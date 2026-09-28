@@ -35,7 +35,8 @@ test("brief excursions request a reading, deduplicate notifications, and recover
   await evaluateReading(f.reading(10, 0));
   await evaluateReading(f.reading(10, 1));
   expect(await Alert.countDocuments({ batchId: f.batchId })).toBe(1);
-  expect(await Notification.countDocuments({ auditBatchId: f.batchId })).toBe(2);
+  expect(await Notification.countDocuments({ auditBatchId: f.batchId })).toBe(4);
+  expect(await Notification.distinct("recipientRole", { auditBatchId: f.batchId })).toEqual(expect.arrayContaining(["admin", "manufacturer", "distributor", "healthcare"]));
   const normal = await evaluateReading(f.reading(5, 2));
   expect(normal.batchQuarantined).toBe(false);
   expect(await Alert.findOne({ batchId: f.batchId }).lean()).toMatchObject({ phase: "RECOVERED", status: "RESOLVED" });
@@ -133,8 +134,18 @@ test("explicit simulation-clock checks detect silence and are idempotent; late d
   expect(await checkMissingTelemetry(f.batchId, f.at(3))).toHaveLength(1);
   expect(await checkMissingTelemetry(f.batchId, f.at(3))).toHaveLength(0);
   expect(await evaluateReading(f.reading(5, 1))).toMatchObject({ evaluated: false });
+  const alert = await Alert.findOne({ batchId: f.batchId, violationType: "TELEMETRY_RELIABILITY" });
   expect(await Alert.countDocuments({ batchId: f.batchId, violationType: "TELEMETRY_RELIABILITY" })).toBe(1);
+  expect((await Notification.findOne({ alertId: alert.alertId })).metadata.sourceLabel).toBe("Temperature ingestion");
   expect((await State.findOne({ batchId: f.batchId })).checkedAt.toISOString()).toBe(f.at(3));
+});
+test("expected-device silence alerts are labeled as automatic simulator events", async () => {
+  const f = await fixture();
+  const [alert] = await checkMissingTelemetry(f.batchId, f.at(3), {
+    deviceId: "EXPECTED-DEVICE", shipmentId: f.shipmentId, expectedSince: f.at(0),
+  });
+  expect(alert.context.source).toBe("software-iot-simulator");
+  expect((await Notification.findOne({ alertId: alert.alertId })).metadata.sourceLabel).toBe("Automatic simulator");
 });
 test("ingestion of one stream checks for missing peer streams using the same event clock", async () => {
   const f = await fixture();

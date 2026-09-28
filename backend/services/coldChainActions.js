@@ -9,26 +9,52 @@ async function audit(alert, action, actorId, reason, eventTime, snapshot = {}) {
 }
 async function notify(alert, stage) {
   const recipients = [{ recipientRole: "admin", recipientRefKey: "" }];
-  if (alert.manufacturerKey) recipients.push({ recipientRole: "manufacturer", recipientRefKey: alert.manufacturerKey });
-  if (["QUARANTINED", "CLEARED"].includes(stage)) {
-    const shipments = await Shipment.find({ batchId: alert.batchId }).lean();
-    for (const shipment of shipments) {
-      if (shipment.distributor) recipients.push({ recipientRole: "distributor", recipientRefKey: normaliseKey(shipment.distributor) });
-      if (shipment.destination) recipients.push({ recipientRole: "healthcare", recipientRefKey: normaliseKey(shipment.destination) });
-    }
-  }
+  const [batch, shipment] = await Promise.all([
+    Batch.findOne({ batchId: alert.batchId }).select("manufacturer vaccineType").lean(),
+    alert.shipmentId ? Shipment.findOne({ shipmentId: alert.shipmentId, batchId: alert.batchId }).lean() : null,
+  ]);
+  const manufacturerKey = alert.manufacturerKey || normaliseKey(batch?.manufacturer);
+  if (manufacturerKey) recipients.push({ recipientRole: "manufacturer", recipientRefKey: manufacturerKey });
+  // Route only through the shipment attached to this event. A batch may have
+  // unrelated deliveries to other distributors or hospitals.
+  if (shipment?.distributor) recipients.push({ recipientRole: "distributor", recipientRefKey: normaliseKey(shipment.distributor) });
+  if (shipment?.destination) recipients.push({ recipientRole: "healthcare", recipientRefKey: normaliseKey(shipment.destination) });
   const unique = [...new Map(recipients.map(r => [`${r.recipientRole}:${r.recipientRefKey}`, r])).values()];
+  const source = alert.context?.source || "temperature-ingestion";
+  const automaticSimulator = ["auto-simulated", "software-iot-simulator"].includes(source);
+  const sourceLabel = source === "manual-override" || alert.context?.overrideId
+    ? "Manual sensor override" : automaticSimulator ? "Automatic simulator" : "Temperature ingestion";
+  const metric = alert.metric === "HUMIDITY" ? "humidity" : alert.metric === "TEMPERATURE" ? "temperature" : "telemetry reliability";
+  const limit = alert.breachedLimit == null ? "not applicable" : `${alert.breachedLimit}${alert.metric === "HUMIDITY" ? "%" : "°C"}`;
+  const reading = alert.metric === "HUMIDITY"
+    ? `${alert.currentHumidity ?? alert.currentReading?.humidity ?? "unknown"}% humidity`
+    : alert.metric === "TEMPERATURE"
+      ? `${alert.currentTemperature ?? alert.currentReading?.temperature ?? "unknown"}°C`
+      : `${alert.currentTemperature ?? "unknown"}°C, ${alert.currentHumidity ?? "unknown"}% humidity`;
+  const durationMinutes = Number(alert.excursionDurationMs || 0) / 60000;
+  const shipmentId = alert.shipmentId || "Unassigned shipment";
+  const vaccine = alert.vaccineType || batch?.vaccineType || "Vaccine not recorded";
+  const distributor = shipment?.distributor || "Unassigned";
+  const hospital = shipment?.destination || "Unassigned";
+  const rolePath = { admin: "/admin", manufacturer: "/manufacturer", distributor: "/distributor", healthcare: "/hospital" };
+  const message = `${alert.reason} Shipment ${shipmentId} · Batch ${alert.batchId} · ${vaccine}. ${metric} breached limit ${limit}; current reading ${reading}; duration ${durationMinutes.toFixed(2)} simulated minutes. Source: ${sourceLabel}. Distributor: ${distributor}; hospital: ${hospital}. Recommended action: ${alert.recommendedAction}`;
   for (const recipient of unique) {
     const deduplicationKey = `${alert.alertId}:${stage}:${recipient.recipientRole}:${recipient.recipientRefKey}`;
+    const deepLink = `${rolePath[recipient.recipientRole] || "/admin"}#shipment-journey`;
     await Notification.updateOne({ deduplicationKey }, { $setOnInsert: {
       ...recipient, recipientRef: recipient.recipientRefKey, deduplicationKey,
       alertId: alert.alertId, auditBatchId: alert.batchId,
       title: `Application Notification: ${stage.replaceAll("_", " ")}`,
-      message: `${alert.batchId}: ${alert.reason} ${alert.recommendedAction}`,
+      message,
       type: stage === "QUARANTINED" ? "error" : "info",
       metadata: { source: alert.context?.source, stage,
         simulated: ["software-iot-simulator", "auto-simulated", "manual-override"].includes(alert.context?.source),
-        overrideId: alert.context?.overrideId, alertId: alert.alertId },
+        sourceLabel, overrideId: alert.context?.overrideId, alertId: alert.alertId,
+        shipmentId, batchId: alert.batchId, vaccineType: vaccine, distributor, hospital,
+        metric: alert.metric, breachedLimit: alert.breachedLimit,
+        currentReading: alert.currentReading || { temperature: alert.currentTemperature, humidity: alert.currentHumidity },
+        excursionDurationMs: alert.excursionDurationMs || 0, recommendedAction: alert.recommendedAction,
+        deepLink },
     } }, { upsert: true });
   }
   alert.notificationTargets = [...new Set([...(alert.notificationTargets || []), ...unique.map(r => `${r.recipientRole}:${r.recipientRefKey || "all"}`)])];

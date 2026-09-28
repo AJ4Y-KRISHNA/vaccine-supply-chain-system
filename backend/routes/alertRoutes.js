@@ -12,6 +12,7 @@ router.post("/telemetry/check", controller.checkTelemetry);
 router.get("/", controller.getAlerts);
 router.get("/:alertId", controller.getAlertById);
 router.patch("/:alertId/acknowledge", controller.acknowledgeAlert);
+router.patch("/:alertId/action-taken", controller.recordResponseAction);
 router.patch("/:alertId/quarantine", controller.quarantineAlert);
 router.patch("/:alertId/review", controller.reviewAlert);
 router.patch("/:alertId/clear", controller.clearAlert);

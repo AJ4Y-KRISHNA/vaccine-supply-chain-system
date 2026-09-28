@@ -17,14 +17,15 @@ for (const [prefix, routes] of [["alerts", "alertRoutes"], ["temperature", "temp
 beforeAll(connect, 15000);
 afterAll(close);
 const bearer = user => ({ Authorization: `Bearer ${issueToken({ id: user._id, role: user.role })}` });
-let f, admin, maker, otherMaker, distributor, hospital, otherHospital;
+let f, admin, maker, otherMaker, distributor, otherDistributor, hospital, otherHospital;
 beforeEach(async () => {
   f = await fixture();
-  [admin, maker, otherMaker, distributor, hospital, otherHospital] = await User.create([
+  [admin, maker, otherMaker, distributor, otherDistributor, hospital, otherHospital] = await User.create([
     { email: `${f.batchId}-admin@test`, password: "test", role: "admin" },
     { email: `${f.batchId}-maker@test`, password: "test", role: "manufacturer", manufacturer: "maker-a" },
     { email: `${f.batchId}-other@test`, password: "test", role: "manufacturer", manufacturer: "maker-b" },
     { email: `${f.batchId}-dist@test`, password: "test", role: "distributor", distributor: "dist-a" },
+    { email: `${f.batchId}-otherdist@test`, password: "test", role: "distributor", distributor: "dist-b" },
     { email: `${f.batchId}-hospital@test`, password: "test", role: "healthcare", hospital: "hospital-a" },
     { email: `${f.batchId}-otherhospital@test`, password: "test", role: "healthcare", hospital: "hospital-b" },
   ]);
@@ -34,7 +35,15 @@ async function held() {
   for (let minute = 0; minute <= 2; minute++) await evaluateReading(f.reading(10, minute));
   return Alert.findOne({ batchId: f.batchId, requiresQualityReview: true });
 }
-const action = (user, alert, kind, minute = 3) => request(app).patch(`/api/alerts/${alert.alertId}/${kind}`).set(bearer(user)).send({ reason: "Reviewed complete synthetic evidence", asOf: f.at(minute) });
+async function action(user, alert, kind, minute = 3) {
+  if (["review", "clear"].includes(kind)) {
+    const latest = await Alert.findById(alert._id);
+    if (latest.responseState === "OPEN") await request(app).patch(`/api/alerts/${alert.alertId}/acknowledge`).set(bearer(user)).send({ reason: "Synthetic alert acknowledged for test" });
+    const afterAck = await Alert.findById(alert._id);
+    if (afterAck.responseState === "ACKNOWLEDGED") await request(app).patch(`/api/alerts/${alert.alertId}/action-taken`).set(bearer(user)).send({ action: "inspect", reason: "Synthetic shipment inspection for test" });
+  }
+  return request(app).patch(`/api/alerts/${alert.alertId}/${kind}`).set(bearer(user)).send({ reason: "Reviewed complete synthetic evidence", asOf: f.at(minute) });
+}
 
 test("approval requires a real designated reviewer, source, complete rules, and batch ownership", async () => {
   const url = `/api/alerts/policies/batch/${f.batchId}/approve`;
@@ -45,13 +54,15 @@ test("approval requires a real designated reviewer, source, complete rules, and 
   expect(approved.body.policy.approvedBy).toBe(String(f.reviewer._id));
   expect(await Audit.countDocuments({ batchId: f.batchId, action: "POLICY_APPROVED" })).toBe(1);
 });
-test("brief alerts are restricted to admin and owning manufacturer; manufacturer can acknowledge", async () => {
+test("brief alerts reach the assigned downstream organizations, but remain scoped to the owning manufacturer", async () => {
   await evaluateReading(f.reading(10));
   expect((await list(admin)).body.total).toBe(1);
   const result = await list(maker);
   expect(result.body.total).toBe(1);
   expect((await list(otherMaker)).body.total).toBe(0);
-  expect((await list(distributor)).body.total).toBe(0);
+  expect((await list(distributor)).body.total).toBe(1);
+  expect((await list(hospital)).body.total).toBe(1);
+  expect((await list(otherDistributor)).body.total).toBe(0);
   expect((await action(maker, result.body.alerts[0], "acknowledge")).status).toBe(200);
 });
 test("quarantine is visible only to the assigned distributor/hospital and cannot leak through ID filters", async () => {
@@ -59,8 +70,75 @@ test("quarantine is visible only to the assigned distributor/hospital and cannot
   expect((await list(distributor)).body.total).toBe(1);
   expect((await list(hospital)).body.total).toBe(1);
   expect((await list(otherHospital)).body.total).toBe(0);
+  expect((await list(otherDistributor)).body.total).toBe(0);
   expect((await request(app).get(`/api/alerts/${alert.alertId}`).set(bearer(otherHospital))).status).toBe(404);
   expect((await request(app).get(`/api/alerts?batchId=${f.batchId}&alertId=${alert.alertId}`).set(bearer(otherHospital))).body.total).toBe(0);
+});
+test("brief alerts route detailed in-app notifications only to the batch owner and assigned shipment organizations", async () => {
+  await Shipment.create({ shipmentId: `${f.shipmentId}-other`, batchId: f.batchId, distributor: "dist-b", destination: "hospital-b", status: "In Transit" });
+  await evaluateReading(f.reading(10, 0, { simulation: { source: "manual-override", overrideId: "OVR-TEST", operatorUserId: "operator-test" } }));
+  const alert = await Alert.findOne({ batchId: f.batchId });
+  const notices = await require("../models/Notification").find({ alertId: alert.alertId }).lean();
+  expect(notices.map(item => `${item.recipientRole}:${item.recipientRefKey || "all"}`).sort()).toEqual([
+    "admin:all", "distributor:dist-a", "healthcare:hospital-a", "manufacturer:maker-a",
+  ]);
+  const notice = notices.find(item => item.recipientRole === "distributor");
+  expect(notice.message).toContain(`Shipment ${f.shipmentId}`);
+  expect(notice.message).toContain(`Batch ${f.batchId}`);
+  expect(notice.message).toContain("Synthetic vaccine");
+  expect(notice.message).toContain("temperature breached limit 8°C");
+  expect(notice.message).toContain("Source: Manual sensor override");
+  expect(notice.metadata).toMatchObject({ source: "manual-override", overrideId: "OVR-TEST", shipmentId: f.shipmentId,
+    batchId: f.batchId, distributor: "dist-a", hospital: "hospital-a", metric: "TEMPERATURE", breachedLimit: 8,
+    sourceLabel: "Manual sensor override", deepLink: "/distributor#shipment-journey" });
+  expect((await list(otherMaker)).body.total).toBe(0);
+  expect((await list(otherDistributor)).body.total).toBe(0);
+});
+test("response lifecycle rejects invalid order, requires notes, audits every transition, and clears only after review", async () => {
+  await evaluateReading(f.reading(10, 0));
+  const alert = await Alert.findOne({ batchId: f.batchId });
+  expect(alert.responseState).toBe("OPEN");
+  expect((await request(app).patch(`/api/alerts/${alert.alertId}/action-taken`).set(bearer(maker)).send({ action: "inspect", reason: "Inspect" })).status).toBe(409);
+  expect((await request(app).patch(`/api/alerts/${alert.alertId}/acknowledge`).set(bearer(maker)).send({})).status).toBe(400);
+  expect((await request(app).patch(`/api/alerts/${alert.alertId}/acknowledge`).set(bearer(maker)).send({ reason: "Observed and assigned to operations" })).status).toBe(200);
+  expect((await request(app).patch(`/api/alerts/${alert.alertId}/action-taken`).set(bearer(maker)).send({ action: "destroy", reason: "Invalid action" })).status).toBe(400);
+  expect((await request(app).patch(`/api/alerts/${alert.alertId}/action-taken`).set(bearer(maker)).send({ action: "inspect" })).status).toBe(400);
+  expect((await request(app).patch(`/api/alerts/${alert.alertId}/review`).set(bearer(f.reviewer)).send({ reason: "Premature quality review", asOf: f.at(1) })).status).toBe(409);
+  expect((await request(app).patch(`/api/alerts/${alert.alertId}/action-taken`).set(bearer(maker)).send({ action: "inspect", reason: "Inspected shipment and confirmed logger condition" })).status).toBe(200);
+  expect((await action(f.reviewer, alert, "review", 1)).status).toBe(409);
+  await evaluateReading(f.reading(5, 1));
+  const beforeClearSummary = (await request(app).get("/api/alerts/summary").set(bearer(admin))).body;
+  expect(beforeClearSummary.active).toBeGreaterThan(0);
+  expect((await action(f.reviewer, alert, "review", 1)).status).toBe(200);
+  const cleared = await action(f.reviewer, alert, "clear", 1);
+  expect(cleared.status).toBe(200);
+  expect(cleared.body.alert.responseState).toBe("RESOLVED");
+  expect(cleared.body.alert.responseResolvedNote).toBe("Reviewed complete synthetic evidence");
+  const afterClearSummary = (await request(app).get("/api/alerts/summary").set(bearer(admin))).body;
+  expect(afterClearSummary.active).toBe(beforeClearSummary.active - 1);
+  expect(afterClearSummary.resolved).toBe(beforeClearSummary.resolved + 1);
+  const detail = await request(app).get(`/api/alerts/${alert.alertId}`).set(bearer(f.reviewer));
+  const responseHistory = detail.body.auditTrail.filter(entry => entry.action.startsWith("RESPONSE_"));
+  expect(responseHistory.map(entry => entry.action)).toEqual(expect.arrayContaining(["RESPONSE_ACKNOWLEDGED", "RESPONSE_ACTION_TAKEN", "RESPONSE_RESOLVED"]));
+  expect(responseHistory).toHaveLength(3);
+  expect(responseHistory.every(entry => entry.actorId && entry.eventTime && entry.reason.length >= 3)).toBe(true);
+});
+test("unacknowledged alerts escalate on simulated time and stop escalating after acknowledgment", async () => {
+  const original = process.env.COLD_CHAIN_ALERT_ESCALATION_AFTER_MS;
+  process.env.COLD_CHAIN_ALERT_ESCALATION_AFTER_MS = "60000";
+  try {
+    await evaluateReading(f.reading(10, 0));
+    const alert = await Alert.findOne({ batchId: f.batchId });
+    await evaluateReading(f.reading(10, 1));
+    const escalated = await list(admin);
+    expect(escalated.body.alerts[0]).toMatchObject({ responseState: "OPEN", escalated: true, escalationAfterMs: 60000 });
+    expect(new Date(escalated.body.alerts[0].escalationAt).toISOString()).toBe(f.at(1));
+    await request(app).patch(`/api/alerts/${alert.alertId}/acknowledge`).set(bearer(maker)).send({ reason: "Operations accepted responsibility" });
+    expect((await list(admin)).body.alerts[0].escalated).toBe(false);
+  } finally {
+    if (original === undefined) delete process.env.COLD_CHAIN_ALERT_ESCALATION_AFTER_MS;
+    else process.env.COLD_CHAIN_ALERT_ESCALATION_AFTER_MS = original;
+  }
 });
 test("normal recovery preserves holds; current evidence review and explicit clearance restore the overlay only", async () => {
   const alert = await held();

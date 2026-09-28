@@ -26,8 +26,8 @@ export const fetchTemperatureNotifications = async () => {
   return response.data;
 };
 
-export const acknowledgeTemperatureAlert = async (alertId) => {
-  const response = await API.patch(`/alerts/${encodeURIComponent(alertId)}/acknowledge`);
+export const acknowledgeTemperatureAlert = async (alertId, details = {}) => {
+  const response = await API.patch(`/alerts/${encodeURIComponent(alertId)}/acknowledge`, details);
   return response.data;
 };
 
