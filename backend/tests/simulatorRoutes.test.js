@@ -1,10 +1,10 @@
-jest.mock("../services/telemetryService", () => ({
-  persistSimulationReading: jest.fn(),
+jest.mock("../services/simulatorTelemetryTransport", () => ({
+  postSimulationReading: jest.fn(),
 }));
 
 const express = require("express");
 const request = require("supertest");
-const { persistSimulationReading } = require("../services/telemetryService");
+const { postSimulationReading } = require("../services/simulatorTelemetryTransport");
 const { simulatorManager } = require("../controllers/simulatorController");
 const simulatorRoutes = require("../routes/simulatorRoutes");
 const { connect, close, fixture } = require("./helpers/coldChainFixture");
@@ -42,7 +42,7 @@ describe("simulator routes", () => {
   beforeEach(async () => {
     simulatorManager.clear();
     await require("../models/SimulatorDevice").deleteMany({});
-    persistSimulationReading.mockResolvedValue({ _id: "telemetry-1" });
+    postSimulationReading.mockResolvedValue({ _id: "telemetry-1" });
   });
 
   afterAll(async () => {
@@ -58,7 +58,19 @@ describe("simulator routes", () => {
     const ticked = await request(app).post(`/api/simulator/${device.deviceId}/tick`).set(auth);
     expect(ticked.status).toBe(200);
     expect(ticked.body.reading.timestamp).toBe(device.startTime);
-    expect(persistSimulationReading).toHaveBeenCalledTimes(1);
+    expect(postSimulationReading).toHaveBeenCalledWith(expect.objectContaining({
+      deviceId: device.deviceId,
+      vehicleId: device.vehicleId,
+      batchId: device.batchId,
+      shipmentId: device.shipmentId,
+      temperature: expect.any(Number),
+      humidity: expect.any(Number),
+      latitude: expect.any(Number),
+      longitude: expect.any(Number),
+      batteryLevel: expect.any(Number),
+      timestamp: device.startTime,
+      simulation: expect.objectContaining({ source: "software-iot-simulator", tick: 0 }),
+    }));
 
     const started = await request(app).post(`/api/simulator/${device.deviceId}/start`).set(auth);
     expect(started.body.simulation.running).toBe(true);
@@ -88,5 +100,19 @@ describe("simulator routes", () => {
     expect((await request(app).post("/api/simulator/devices").set(auth).send({ ...device, shipmentId: "not-real" })).status).toBe(400);
     expect((await request(app).post("/api/simulator/devices").set(auth).send(device)).status).toBe(201);
     expect((await request(app).post("/api/simulator/devices").set(auth).send(device)).status).toBe(409);
+  });
+
+  test("manual data mode disables simulator operations", async () => {
+    const previous = process.env.DATA_MODE;
+    process.env.DATA_MODE = "manual";
+    postSimulationReading.mockClear();
+    try {
+      const response = await request(app).post("/api/simulator/devices").set(auth).send(device);
+      expect(response.status).toBe(409);
+      expect(response.body.error).toMatch(/disabled in DATA_MODE=manual/);
+      expect(postSimulationReading).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) delete process.env.DATA_MODE; else process.env.DATA_MODE = previous;
+    }
   });
 });

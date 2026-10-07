@@ -18,15 +18,32 @@ const baseConfig = {
 };
 
 describe("VirtualDeviceSimulator", () => {
+  test("scenario ground truth follows injection timing and is independent of policy temperature", () => {
+    const simulator = new VirtualDeviceSimulator(baseConfig);
+    expect(simulator.tick().groundTruth).toEqual({ anomaly_active: false, anomaly_type: null });
+    simulator.setScenario("COMPRESSOR_DRIFT");
+    const drift = simulator.tick();
+    expect(drift.groundTruth).toEqual({ anomaly_active: true, anomaly_type: "compressor_drift" });
+    expect(drift.temperature).toBeLessThanOrEqual(8);
+    simulator.setScenario("GPS_JUMP");
+    const gpsPrelude = simulator.tick();
+    const gpsJump = Array.from({ length: 8 }, () => simulator.tick()).at(-1);
+    expect(gpsPrelude.groundTruth.anomaly_active).toBe(false);
+    expect(gpsJump.groundTruth).toEqual({ anomaly_active: true, anomaly_type: "gps_jump" });
+  });
+
   test("a fixed seed and configuration produce identical readings", () => {
     const first = new VirtualDeviceSimulator(baseConfig);
     const second = new VirtualDeviceSimulator(baseConfig);
 
-    expect([first.tick(), first.tick(), first.tick()]).toEqual([
-      second.tick(),
-      second.tick(),
-      second.tick(),
-    ]);
+    const firstReadings = [first.tick(), first.tick(), first.tick()];
+    const secondReadings = [second.tick(), second.tick(), second.tick()];
+    expect(firstReadings.map(({ correlationId, ...reading }) => reading)).toEqual(
+      secondReadings.map(({ correlationId, ...reading }) => reading)
+    );
+    expect(firstReadings).toHaveLength(3);
+    firstReadings.forEach(reading => expect(reading.correlationId).toMatch(/^[0-9a-f-]{36}$/i));
+    expect(new Set(firstReadings.map(reading => reading.correlationId)).size).toBe(3);
   });
 
   test("the deterministic clock advances by the configured interval", () => {
@@ -37,6 +54,18 @@ describe("VirtualDeviceSimulator", () => {
     expect(first.timestamp).toBe("2026-09-17T10:30:00.000Z");
     expect(second.timestamp).toBe("2026-09-17T10:30:01.000Z");
     expect(simulator.getStatus().currentTime).toBe("2026-09-17T10:30:02.000Z");
+  });
+
+  test("device sequence remains unique when a simulator run is reset", () => {
+    const simulator = new VirtualDeviceSimulator(baseConfig);
+    const first = simulator.tick();
+    simulator.reset();
+    const afterReset = simulator.tick();
+    expect(first.simulation.tick).toBe(0);
+    expect(afterReset.simulation.tick).toBe(0);
+    expect(first.sequenceNumber).toBe(0);
+    expect(afterReset.sequenceNumber).toBe(1);
+    expect(VirtualDeviceSimulator.restore(simulator.snapshot()).tick().sequenceNumber).toBe(2);
   });
 
   test("normal readings stay within the configured temperature range", () => {
@@ -62,6 +91,38 @@ describe("VirtualDeviceSimulator", () => {
     expect(low.temperature).toBeLessThan(2);
   });
 
+  test("Phase 2 profiles are deterministic and the default route includes the named distribution stops", () => {
+    const config = { ...baseConfig, scenario: "COMPRESSOR_DRIFT", seed: "phase-2-fixed-seed" };
+    const first = new VirtualDeviceSimulator(config);
+    const replay = new VirtualDeviceSimulator(config);
+    expect(Array.from({ length: 8 }, () => first.tick().temperature))
+      .toEqual(Array.from({ length: 8 }, () => replay.tick().temperature));
+    const defaults = new VirtualDeviceSimulator({ deviceId: "ROUTE-DEVICE", seed: "route-seed" });
+    expect(defaults.config.route.map(point => point.waypoint)).toEqual([
+      "Kochi", "Tripunithura", "Muvattupuzha", "Perumbavoor", "Healthcare Center",
+    ]);
+    const linkLoss = new VirtualDeviceSimulator({ ...baseConfig, scenario: "LINK_LOSS" }).tick();
+    expect(linkLoss.simulation.linkLoss).toBe(true);
+  });
+
+  test("synthetic perturbation settings are reproducible and compressor slope scales with elapsed time", () => {
+    const config = { ...baseConfig, scenario: "NORMAL", seed: "noise-check", noiseScale: 1.5 };
+    const first = new VirtualDeviceSimulator(config);
+    const replay = new VirtualDeviceSimulator(config);
+    expect(Array.from({ length: 20 }, () => first.tick().temperature))
+      .toEqual(Array.from({ length: 20 }, () => replay.tick().temperature));
+
+    const driftAt = interval => {
+      const simulator = new VirtualDeviceSimulator({ ...baseConfig, scenario: "COMPRESSOR_DRIFT",
+        seed: "slope-check", tickIntervalMs: interval, driftSlopeCPerMinute: 0.36 });
+      let sample;
+      for (let elapsed = 0; elapsed <= 60_000; elapsed += interval) sample = simulator.tick();
+      return sample.temperature;
+    };
+    expect(Math.abs(driftAt(60_000) - driftAt(10_000))).toBeLessThanOrEqual(0.2);
+    expect(() => new VirtualDeviceSimulator({ ...baseConfig, noiseScale: 0 })).toThrow(/noiseScale/);
+  });
+
   test("GPS movement follows the configured route", () => {
     const simulator = new VirtualDeviceSimulator({ ...baseConfig, scenario: "GPS_MOVEMENT" });
     const first = simulator.tick();
@@ -74,10 +135,23 @@ describe("VirtualDeviceSimulator", () => {
   });
 
   test("GPS reaches the last waypoint and reverses smoothly", () => {
-    const simulator = new VirtualDeviceSimulator(baseConfig);
-    const readings = Array.from({ length: 12 }, () => simulator.tick());
-    expect(readings[10].latitude).toBe(baseConfig.route[1].latitude);
-    expect(readings[11].latitude).toBe(readings[9].latitude);
+    const simulator = new VirtualDeviceSimulator({ ...baseConfig, tickIntervalMs: 60000 });
+    const readings = Array.from({ length: 22 }, () => simulator.tick());
+    expect(readings[20].latitude).toBe(baseConfig.route[1].latitude);
+    expect(readings[21].latitude).toBe(readings[19].latitude);
+  });
+
+  test("GPS route has the same physical progress at 10 and 60 second sampling; return jump stays labelled", () => {
+    const slow = new VirtualDeviceSimulator({ ...baseConfig, tickIntervalMs: 60000 });
+    const fast = new VirtualDeviceSimulator({ ...baseConfig, tickIntervalMs: 10000 });
+    const a = Array.from({ length: 3 }, () => slow.tick()).at(-1);
+    const b = Array.from({ length: 13 }, () => fast.tick()).at(-1);
+    expect(a.latitude).toBe(b.latitude);
+    expect(a.longitude).toBe(b.longitude);
+    slow.setScenario("GPS_JUMP");
+    const fixes = Array.from({ length: 10 }, () => slow.tick());
+    expect(fixes[8].groundTruth.anomaly_active).toBe(true);
+    expect(fixes[9].groundTruth.anomaly_active).toBe(true);
   });
 
   test("battery drain scenario decreases battery faster than a normal scenario", () => {

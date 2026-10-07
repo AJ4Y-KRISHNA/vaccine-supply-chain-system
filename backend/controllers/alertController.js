@@ -64,9 +64,10 @@ function escalationThresholdMs() {
   const configured = Number(process.env.COLD_CHAIN_ALERT_ESCALATION_AFTER_MS);
   return Number.isFinite(configured) && configured > 0 ? Math.min(configured, 7 * 24 * 60 * 60 * 1000) : 5 * 60 * 1000;
 }
-function batchStoryLink(role) {
+function batchStoryLink(role, batchId) {
   const rolePath = { admin: "/admin", manufacturer: "/manufacturer", distributor: "/distributor", healthcare: "/hospital" };
-  return `${rolePath[role] || "/"}#shipment-journey`;
+  const batchQuery = batchId ? `?batchId=${encodeURIComponent(batchId)}` : "";
+  return `${rolePath[role] || "/"}${batchQuery}#shipment-journey`;
 }
 async function includeResponseState(alerts, role) {
   if (!alerts.length) return alerts;
@@ -83,7 +84,7 @@ async function includeResponseState(alerts, role) {
     const threshold = escalationThresholdMs();
     const escalationAt = alert.excursionStartedAt ? new Date(+alert.excursionStartedAt + threshold) : null;
     const escalated = responseState === "OPEN" && Boolean(escalationAt) && simulationNow >= +escalationAt;
-    return { ...alert, responseState, escalationAfterMs: threshold, escalated, escalationAt, deepLink: batchStoryLink(role) };
+    return { ...alert, responseState, escalationAfterMs: threshold, escalated, escalationAt, deepLink: batchStoryLink(role, alert.batchId) };
   });
 }
 
@@ -131,7 +132,12 @@ exports.getAlertById = handler(async (req, res) => {
   const states = await State.find({ batchId: alert.batchId }).lean();
   const latestClock = states.reduce((last, state) => Math.max(last, +state.lastReadingAt, +state.checkedAt || 0), 0);
   const [decorated] = await includeResponseState([alert], req.user.role);
-  return res.json({ alert: decorated, auditTrail, evidenceAsOf: latestClock ? new Date(latestClock).toISOString() : null });
+  let anchoringStatus = "pending";
+  if (alert.temperatureLogId) {
+    const reading = await require("../models/TemperatureLog").findById(alert.temperatureLogId).lean();
+    if (reading) anchoringStatus = (await require("../services/merkleAnchoring").verifyReading(reading)).anchored;
+  }
+  return res.json({ alert: decorated, auditTrail, anchoringStatus, evidenceAsOf: latestClock ? new Date(latestClock).toISOString() : null });
 });
 
 // All human actions and evaluations for a batch share a queue in this single-process prototype.

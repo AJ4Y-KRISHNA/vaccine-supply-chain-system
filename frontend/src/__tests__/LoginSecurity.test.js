@@ -6,7 +6,7 @@ import ProtectedRoute from "../components/ProtectedRoute";
 import API from "../services/api";
 jest.mock("../services/api", () => ({ post: jest.fn() }));
 jest.mock("../components/Toast", () => ({ useToast: () => ({ addToast: jest.fn() }) }));
-beforeEach(() => { localStorage.clear(); jest.clearAllMocks(); });
+beforeEach(() => { localStorage.clear(); sessionStorage.clear(); jest.clearAllMocks(); });
 test("failed login never creates a role-only session", async () => {
   API.post.mockRejectedValue(new Error("Unauthorized"));
   render(<MemoryRouter><Login /></MemoryRouter>);
@@ -15,11 +15,11 @@ test("failed login never creates a role-only session", async () => {
   fireEvent.change(screen.getByRole("combobox"), { target: { value: "Admin" } });
   fireEvent.click(screen.getByRole("button", { name: "Login" }));
   await waitFor(() => expect(API.post).toHaveBeenCalled());
-  await waitFor(() => expect(localStorage.getItem("role")).toBeNull());
-  expect(localStorage.getItem("token")).toBeNull();
+  await waitFor(() => expect(sessionStorage.getItem("role")).toBeNull());
+  expect(sessionStorage.getItem("token")).toBeNull();
 });
 test("role storage alone cannot open a protected page", () => {
-  localStorage.setItem("role", "Admin");
+  sessionStorage.setItem("role", "Admin");
   render(<MemoryRouter><ProtectedRoute allowed={["Admin"]}><div>Protected content</div></ProtectedRoute></MemoryRouter>);
   expect(screen.queryByText("Protected content")).not.toBeInTheDocument();
 });

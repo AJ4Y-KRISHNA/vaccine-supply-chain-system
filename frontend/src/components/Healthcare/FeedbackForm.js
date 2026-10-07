@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { MessageSquarePlus, RefreshCw } from "lucide-react";
 import { useToast } from "../Toast";
 import {
@@ -16,6 +16,7 @@ const categoryOptions = [
 
 const severityOptions = ["Low", "Medium", "High"];
 const ageGroupOptions = ["Child", "Adult", "Senior"];
+const emptyOptions = [];
 
 function toLocalDateTimeValue(value) {
   const date = value ? new Date(value) : new Date();
@@ -38,8 +39,8 @@ export default function FeedbackForm({
   healthcareCenter,
   region,
   submittedBy,
-  batchSuggestions = [],
-  appointments = [],
+  batchSuggestions = emptyOptions,
+  appointments = emptyOptions,
   onCreated,
 }) {
   const { addToast } = useToast();
@@ -49,6 +50,8 @@ export default function FeedbackForm({
   const [errors, setErrors] = useState({});
   const [submitState, setSubmitState] = useState({ type: "", message: "" });
   const [recentFeedback, setRecentFeedback] = useState([]);
+  const [listError, setListError] = useState("");
+  const submitLock = useRef(false);
   const [form, setForm] = useState(() => ({
     patientFeedbackText: "",
     feedbackCategory: "Side Effects",
@@ -59,18 +62,19 @@ export default function FeedbackForm({
     region: region || "",
     submittedBy: submittedBy || "",
     observationDate: toLocalDateTimeValue(),
-    consentToUseForAnalytics: true,
+    consentToUseForAnalytics: false,
   }));
 
   const loadFeedback = async () => {
     try {
       setIsLoadingList(true);
+      setListError("");
       const response = await fetchHealthcareFeedback({
         healthcareCenter,
       });
       setRecentFeedback(response.records || []);
     } catch (_error) {
-      setRecentFeedback([]);
+      setListError("Feedback history could not be loaded. Use Refresh feedback to retry.");
     } finally {
       setIsLoadingList(false);
     }
@@ -108,6 +112,8 @@ export default function FeedbackForm({
     if (!form.feedbackCategory) nextErrors.feedbackCategory = "Category is required.";
     if (!form.severity) nextErrors.severity = "Severity is required.";
     if (!form.vaccineBatchId.trim()) nextErrors.vaccineBatchId = "Batch ID is required.";
+    if (!form.observationDate || !Number.isFinite(+new Date(form.observationDate))) nextErrors.observationDate = "Enter a valid observation date.";
+    else if (+new Date(form.observationDate) > Date.now()) nextErrors.observationDate = "Observation date cannot be in the future.";
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   };
@@ -123,15 +129,16 @@ export default function FeedbackForm({
       region: region || "",
       submittedBy: submittedBy || "",
       observationDate: toLocalDateTimeValue(),
-      consentToUseForAnalytics: true,
+      consentToUseForAnalytics: false,
     });
     setErrors({});
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (isSubmitting) return;
+    if (submitLock.current) return;
     if (!validate()) return;
+    submitLock.current = true;
 
     try {
       setIsSubmitting(true);
@@ -144,6 +151,7 @@ export default function FeedbackForm({
         region: form.region.trim(),
         submittedBy: form.submittedBy.trim(),
         healthcareCenter,
+        observationDate: new Date(form.observationDate).toISOString(),
       };
 
       const created = await submitHealthcareFeedback(payload);
@@ -155,7 +163,7 @@ export default function FeedbackForm({
       resetForm();
       setIsOpen(false);
       await loadFeedback();
-      onCreated?.(created);
+      try { await onCreated?.(created); } catch (_error) { setListError("Feedback was saved. Refresh the dashboard to update its summary; do not submit again."); }
     } catch (error) {
       const fieldErrors = error?.response?.data?.errors || {};
       setErrors(fieldErrors);
@@ -164,6 +172,7 @@ export default function FeedbackForm({
       addToast("error", message);
     } finally {
       setIsSubmitting(false);
+      submitLock.current = false;
     }
   };
 
@@ -173,12 +182,14 @@ export default function FeedbackForm({
         <div>
           <h4 className="text-[1.05rem] font-semibold text-slate-800">Healthcare Feedback</h4>
           <p className="mt-1 text-sm text-slate-500">
-            Submit patient feedback for AI sentiment scoring and admin risk review.
+            Submit synthetic demonstration feedback for sentiment scoring and admin review. Do not enter real patient identifiers.
           </p>
         </div>
         <div className="flex gap-2">
           <button
             type="button"
+            aria-label="Refresh feedback"
+            disabled={isLoadingList || isSubmitting}
             onClick={loadFeedback}
             className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
           >
@@ -186,6 +197,8 @@ export default function FeedbackForm({
           </button>
           <button
             type="button"
+            disabled={isSubmitting}
+            aria-expanded={isOpen}
             onClick={() => setIsOpen((current) => !current)}
             className="inline-flex items-center gap-2 rounded-lg bg-[#2f8ae0] px-4 py-2 text-sm font-semibold text-white"
           >
@@ -197,6 +210,7 @@ export default function FeedbackForm({
 
       {submitState.message ? (
         <div
+          role={submitState.type === "success" ? "status" : "alert"}
           className={`mb-4 rounded-xl px-4 py-3 text-sm ${
             submitState.type === "success"
               ? "border border-emerald-100 bg-emerald-50 text-emerald-700"
@@ -209,12 +223,14 @@ export default function FeedbackForm({
 
       {isOpen ? (
         <form onSubmit={handleSubmit} className="mb-5 rounded-2xl border border-[#edf2f8] bg-[#f8fbff] p-4">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <fieldset disabled={isSubmitting} className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="md:col-span-2">
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Patient Feedback Text
               </label>
               <textarea
+                aria-label="Patient feedback text"
+                maxLength={5000}
                 rows={4}
                 value={form.patientFeedbackText}
                 onChange={(e) => setForm((current) => ({ ...current, patientFeedbackText: e.target.value }))}
@@ -231,6 +247,7 @@ export default function FeedbackForm({
                 Feedback Category
               </label>
               <select
+                aria-label="Feedback category"
                 value={form.feedbackCategory}
                 onChange={(e) => setForm((current) => ({ ...current, feedbackCategory: e.target.value }))}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none"
@@ -249,6 +266,7 @@ export default function FeedbackForm({
                 Severity
               </label>
               <select
+                aria-label="Severity"
                 value={form.severity}
                 onChange={(e) => setForm((current) => ({ ...current, severity: e.target.value }))}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none"
@@ -267,6 +285,7 @@ export default function FeedbackForm({
                 Vaccine Batch ID
               </label>
               <input
+                aria-label="Vaccine batch ID"
                 list="feedback-batch-options"
                 value={form.vaccineBatchId}
                 onChange={(e) => setForm((current) => ({ ...current, vaccineBatchId: e.target.value }))}
@@ -288,6 +307,7 @@ export default function FeedbackForm({
                 Appointment ID (Optional)
               </label>
               <input
+                aria-label="Appointment ID (optional)"
                 list="feedback-appointment-options"
                 value={form.appointmentId}
                 onChange={(e) => setForm((current) => ({ ...current, appointmentId: e.target.value }))}
@@ -306,6 +326,7 @@ export default function FeedbackForm({
                 Patient Age Group
               </label>
               <select
+                aria-label="Patient age group"
                 value={form.patientAgeGroup}
                 onChange={(e) => setForm((current) => ({ ...current, patientAgeGroup: e.target.value }))}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none"
@@ -322,6 +343,7 @@ export default function FeedbackForm({
                 Region
               </label>
               <input
+                aria-label="Feedback region"
                 value={form.region}
                 onChange={(e) => setForm((current) => ({ ...current, region: e.target.value }))}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none"
@@ -333,6 +355,8 @@ export default function FeedbackForm({
                 Submitted By
               </label>
               <input
+                aria-label="Submitted by"
+                readOnly
                 value={form.submittedBy}
                 onChange={(e) => setForm((current) => ({ ...current, submittedBy: e.target.value }))}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none"
@@ -344,17 +368,20 @@ export default function FeedbackForm({
                 Observation Date
               </label>
               <input
+                aria-label="Observation date"
                 type="datetime-local"
                 value={form.observationDate}
                 onChange={(e) => setForm((current) => ({ ...current, observationDate: e.target.value }))}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none"
               />
+              {errors.observationDate && <p role="alert" className="mt-1 text-xs text-rose-600">{errors.observationDate}</p>}
             </div>
-          </div>
+          </fieldset>
 
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-600">
             <input
               type="checkbox"
+              disabled={isSubmitting}
               checked={form.consentToUseForAnalytics}
               onChange={(e) => setForm((current) => ({ ...current, consentToUseForAnalytics: e.target.checked }))}
             />
@@ -371,6 +398,7 @@ export default function FeedbackForm({
             </button>
             <button
               type="button"
+              disabled={isSubmitting}
               onClick={resetForm}
               className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600"
             >
@@ -380,6 +408,7 @@ export default function FeedbackForm({
         </form>
       ) : null}
 
+      {listError && <p role="alert" className="mb-4 text-sm text-rose-700">{listError}</p>}
       <div className="space-y-3">
         {recentFeedback.map((item) => (
           <div key={item._id} className="rounded-xl border border-slate-100 px-4 py-3">
@@ -403,7 +432,7 @@ export default function FeedbackForm({
             </div>
           </div>
         ))}
-        {!recentFeedback.length && (
+        {!recentFeedback.length && !listError && (
           <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">
             {isLoadingList ? "Loading feedback..." : "No healthcare feedback submitted yet."}
           </div>

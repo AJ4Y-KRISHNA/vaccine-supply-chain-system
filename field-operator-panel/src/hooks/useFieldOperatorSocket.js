@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useFieldOperatorStore } from "../stores/fieldOperatorStore.js";
 
 const SOCKET_PROTOCOL = "field-operator.v1";
@@ -14,6 +14,8 @@ function normalizeTelemetry(payload, fallbackClock = null) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const location = payload.location || {};
   return {
+    readingId: typeof payload.readingId === "string" ? payload.readingId : null,
+    sequenceNumber: finiteOrNull(payload.sequenceNumber),
     temperature: finiteOrNull(payload.temperature),
     humidity: finiteOrNull(payload.humidity),
     battery: finiteOrNull(payload.battery ?? payload.batteryLevel),
@@ -31,6 +33,35 @@ function normalizeTelemetry(payload, fallbackClock = null) {
   };
 }
 
+function normalizeAlert(payload, shipmentId) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const timestamp = payload.simulationClock || payload.timestamp || null;
+  const metric = typeof payload.metric === "string" ? payload.metric : "unknown metric";
+  const value = payload.value ?? null;
+  const limit = payload.limit ?? null;
+  const alertId =
+    typeof payload.alertId === "string" && payload.alertId.trim()
+      ? payload.alertId.trim()
+      : `${shipmentId || "shipment"}:${timestamp || Date.now()}:${metric}:${value ?? ""}:${limit ?? ""}`;
+  return {
+    alertId,
+    severity: typeof payload.severity === "string" ? payload.severity : "warning",
+    metric,
+    value,
+    limit,
+    duration: payload.duration ?? null,
+    message:
+      typeof payload.message === "string" ? payload.message : "A simulator alert was reported.",
+    simulationClock: timestamp,
+    status: typeof payload.status === "string" ? payload.status : null,
+    phase: typeof payload.phase === "string" ? payload.phase : null,
+    requiresQualityReview: Boolean(payload.requiresQualityReview),
+    excursionStartedAt: payload.excursionStartedAt || null,
+    excursionClosedAt: payload.excursionClosedAt || null,
+    shipmentId: typeof payload.shipmentId === "string" ? payload.shipmentId : shipmentId,
+  };
+}
+
 function makeSocketUrl(shipmentId) {
   const configured =
     import.meta.env.VITE_BACKEND_WS_URL ||
@@ -44,11 +75,29 @@ function makeSocketUrl(shipmentId) {
   return url.toString();
 }
 
-/** Connects to the Step 8 backend endpoint and handles the Step 4 INIT/READING protocol. */
+/** Connects to Step 8's endpoint and exposes Step 6 commands over the shipment socket. */
 export default function useFieldOperatorSocket({ shipmentId, accessToken }) {
+  const socketRef = useRef(null);
   const setConnection = useFieldOperatorStore((state) => state.setConnection);
   const setInitMessage = useFieldOperatorStore((state) => state.setInitMessage);
   const setReading = useFieldOperatorStore((state) => state.setReading);
+  const addAlert = useFieldOperatorStore((state) => state.addAlert);
+  const setOverrideResult = useFieldOperatorStore((state) => state.setOverrideResult);
+  const setActiveOverride = useFieldOperatorStore((state) => state.setActiveOverride);
+  const setStatusChange = useFieldOperatorStore((state) => state.setStatusChange);
+
+  const sendCommand = useCallback((command) => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return { ok: false, error: "The shipment connection is not ready. Reconnect and try again." };
+    }
+    try {
+      socket.send(JSON.stringify(command));
+      return { ok: true };
+    } catch {
+      return { ok: false, error: "The command could not be sent. Check the connection and retry." };
+    }
+  }, []);
 
   useEffect(() => {
     if (!shipmentId || !accessToken) {
@@ -91,9 +140,31 @@ export default function useFieldOperatorSocket({ shipmentId, accessToken }) {
           return;
         }
         const clock = message.currentState?.simulationClock || null;
-        setInitMessage(message, normalizeTelemetry(message.currentState?.latestReading, clock));
+        const latest = normalizeTelemetry(message.currentState?.latestReading, clock);
+        const history = Array.isArray(message.currentState?.readingHistory)
+          ? message.currentState.readingHistory
+              .map((reading) => normalizeTelemetry(reading, clock))
+              .filter(Boolean)
+          : [];
+        const alerts = Array.isArray(message.currentState?.alerts)
+          ? message.currentState.alerts
+              .map((alert) => normalizeAlert(alert, shipmentId))
+              .filter(Boolean)
+          : [];
+        setInitMessage(message, latest, history, alerts);
       } else if (message.type === "READING") {
         setReading(normalizeTelemetry(message, message.simulationClock));
+        if (Object.prototype.hasOwnProperty.call(message, "activeOverride")) {
+          setActiveOverride(message.activeOverride);
+        }
+      } else if (message.type === "OVERRIDE_RESULT") {
+        setOverrideResult(message);
+      } else if (message.type === "ALERT") {
+        if (message.shipmentId && message.shipmentId !== shipmentId) return;
+        const alert = normalizeAlert(message, shipmentId);
+        if (alert) addAlert(alert);
+      } else if (message.type === "STATUS_CHANGE") {
+        setStatusChange(message);
       }
     };
 
@@ -105,6 +176,7 @@ export default function useFieldOperatorSocket({ shipmentId, accessToken }) {
         // subprotocol (never in the URL); Step 8 must validate it and select the
         // non-secret field-operator.v1 protocol in its upgrade handler.
         socket = new WebSocket(socketUrl, [SOCKET_PROTOCOL, `bearer.${accessToken}`]);
+        socketRef.current = socket;
       } catch {
         scheduleReconnect();
         return;
@@ -129,9 +201,22 @@ export default function useFieldOperatorSocket({ shipmentId, accessToken }) {
       if (socket) {
         socket.onclose = null;
         socket.close();
+        if (socketRef.current === socket) socketRef.current = null;
       }
     };
-  }, [accessToken, shipmentId, setConnection, setInitMessage, setReading]);
+  }, [
+    accessToken,
+    shipmentId,
+    setConnection,
+    setInitMessage,
+    setReading,
+    addAlert,
+    setOverrideResult,
+    setActiveOverride,
+    setStatusChange,
+  ]);
+
+  return { sendCommand };
 }
 
-export { normalizeTelemetry };
+export { normalizeAlert, normalizeTelemetry };

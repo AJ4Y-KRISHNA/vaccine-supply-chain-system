@@ -21,5 +21,6 @@ const schema = new mongoose.Schema({
     reliability: { type: String, default: "CHECK_DEVICE" },
   },
 });
+require("./demoFields")(schema);
 require("./appendOnly")(schema);
 module.exports = mongoose.model("ColdChainPolicy", schema);

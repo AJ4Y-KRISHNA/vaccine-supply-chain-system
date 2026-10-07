@@ -1,8 +1,9 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { User, Lock, Briefcase, ShieldCheck, Search, Link } from "lucide-react";
+import React, { useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { User, Lock, Briefcase, ShieldCheck, Search, Link, Eye, EyeOff } from "lucide-react";
 import { useToast } from "../components/Toast";
 import API from "../services/api";
+import { clearSession, notifySessionChanged } from "../services/session";
 
 function displayRole(role) {
   const normalized = String(role || "").toLowerCase();
@@ -21,58 +22,60 @@ function apiRole(role) {
 
 function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { addToast } = useToast();
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const inFlight = useRef(false);
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    if (!role) {
-      addToast("error", "Please select a role to continue.");
+    if (inFlight.current) return;
+    if (!role || !username.trim() || !password) {
+      setError("Enter your username, password and role to continue.");
       return;
     }
+    inFlight.current = true; setBusy(true); setError("");
     try {
       const res = await API.post("/auth/login", {
-        email: username,
+        email: username.trim(),
         password,
         role: apiRole(role),
       });
-      localStorage.setItem("role", displayRole(res.data.role || role));
-      localStorage.setItem("userEmail", username);
-      localStorage.setItem("token", res.data.token);
+      const signedRole = displayRole(res.data.role);
+      const destination = { Admin: "/admin", Manufacturer: "/manufacturer", Distributor: "/distributor", "Healthcare Professional": "/hospital" }[signedRole];
+      if (!res.data.token || !destination) throw new Error("The server did not return a valid session.");
+      sessionStorage.setItem("role", signedRole);
+      sessionStorage.setItem("userEmail", res.data.identity?.email || username.trim());
+      sessionStorage.setItem("token", res.data.token);
       if (res.data.refreshToken) {
-        localStorage.setItem("refreshToken", res.data.refreshToken);
-      }
+        sessionStorage.setItem("refreshToken", res.data.refreshToken);
+      } else sessionStorage.removeItem("refreshToken");
+      notifySessionChanged();
+      const returnTo = location.state?.verificationReturnTo;
+      navigate(typeof returnTo === "string" && /^\/verify\/[^/]+$/.test(returnTo) ? returnTo : destination, { replace: true });
     } catch (err) {
-      addToast("error", "Login failed. Check your credentials and backend connection.");
-      localStorage.removeItem("token");
-      localStorage.removeItem("refreshToken");
-      localStorage.removeItem("userEmail");
-      localStorage.removeItem("role");
-      return;
-    }
-
-    if (role === "Admin") navigate("/admin");
-    else if (role === "Manufacturer") navigate("/manufacturer");
-    else if (role === "Distributor") navigate("/distributor");
-    else if (role === "Healthcare Professional") navigate("/hospital");
+      const message = "Login failed. Check your credentials, selected role and backend connection.";
+      setError(message); addToast("error", message); clearSession();
+    } finally { inFlight.current = false; setBusy(false); }
   };
 
   const handleReset = (e) => {
     e.preventDefault();
+    if (inFlight.current) return;
     setUsername("");
     setPassword("");
     setRole("");
-    localStorage.removeItem("role");
-    localStorage.removeItem("token");
-    localStorage.removeItem("refreshToken");
-    localStorage.removeItem("userEmail");
+    setError(""); setShowPassword(false); clearSession();
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#e0d4fc] via-[#f3eeff] to-[#d6efff] flex items-center justify-center p-4 relative overflow-hidden">
+    <div className="login-page min-h-screen bg-gradient-to-br from-[#e0d4fc] via-[#f3eeff] to-[#d6efff] flex items-center justify-center p-4 relative overflow-hidden">
       {/* Background Decorative Blocks */}
       <div className="absolute top-20 left-10 w-24 h-24 bg-purple-300 rounded-lg opacity-20 transform rotate-12"></div>
       <div className="absolute bottom-20 right-10 w-32 h-32 bg-blue-300 rounded-lg opacity-20 transform -rotate-12"></div>
@@ -127,6 +130,9 @@ function Login() {
               <h2 className="text-2xl font-bold text-[#7e42b5] text-center mb-8">Login Dashboard</h2>
               
               <form onSubmit={handleLogin} className="space-y-5">
+                {location.state?.sessionMessage && !error && <p role="status" className="text-sm text-slate-600">{location.state.sessionMessage}</p>}
+                {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+                <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-900">To use multiple roles at once, open this site in separate tabs and sign in to each tab with a different account. Each tab has its own session; signing out affects only that tab.</p>
                 {/* Username Input */}
                 <div className="relative">
                   <div className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400">
@@ -134,6 +140,10 @@ function Login() {
                   </div>
                   <input
                     type="text"
+                    aria-label="Username"
+                    autoComplete="username"
+                    disabled={busy}
+                    maxLength={254}
                     placeholder="Username"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
@@ -148,16 +158,18 @@ function Login() {
                     <Lock size={20} />
                   </div>
                   <input
-                    type="password"
+                    type={showPassword ? "text" : "password"}
+                    aria-label="Password"
+                    autoComplete="current-password"
+                    disabled={busy}
+                    maxLength={128}
                     placeholder="Password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="w-full pl-12 pr-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-[#7e42b5] focus:ring-1 focus:ring-[#7e42b5] transition-colors bg-gray-50 text-gray-700"
                     required
                   />
-                  <div className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 font-bold">
-                    •••
-                  </div>
+                  <button type="button" disabled={busy} aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} onClick={() => setShowPassword(value => !value)} className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-1 text-slate-500">{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button>
                 </div>
 
                 {/* Role Select Dropdown */}
@@ -166,6 +178,8 @@ function Login() {
                     <Briefcase size={20} />
                   </div>
                   <select
+                    aria-label="Role"
+                    disabled={busy}
                     value={role}
                     onChange={(e) => setRole(e.target.value)}
                     className="w-full pl-12 pr-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-[#7e42b5] focus:ring-1 focus:ring-[#7e42b5] transition-colors bg-gray-50 text-gray-700 appearance-none"
@@ -186,13 +200,15 @@ function Login() {
                 <div className="flex gap-4 pt-4">
                   <button
                     type="submit"
+                    disabled={busy}
                     className="flex-1 bg-[#7e42b5] hover:bg-[#6c369e] text-white py-3 rounded-xl font-semibold shadow-md transition-transform hover:-translate-y-0.5"
                   >
-                    Login
+                    {busy ? "Signing in…" : "Login"}
                   </button>
                   <button
                     onClick={handleReset}
                     type="button"
+                    disabled={busy}
                     className="flex-1 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 py-3 rounded-xl font-semibold shadow-sm transition-transform hover:-translate-y-0.5"
                   >
                     Reset

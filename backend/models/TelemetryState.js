@@ -19,4 +19,5 @@ module.exports = mongoose.model("TelemetryState", new mongoose.Schema({
   humiditySince: Date,
   humidityDirection: String,
   source: String,
+  correlationId: { type: String, maxlength: 128 },
 }));

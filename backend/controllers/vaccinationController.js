@@ -1,6 +1,6 @@
 const Vaccination = require("../models/Vaccination");
-const Shipment = require("../models/Shipment");
 const Batch = require("../models/Batch");
+const { confirmedBatchStock, prepareAdministration, administrationReplay, completeAdministrationOperation } = require("../services/healthcareInventory");
 const {
   recordOnBlockchain,
   logLifecycleEventOnChain,
@@ -37,6 +37,7 @@ exports.requestVaccines = async (req, res) => {
       workflowStage: "1.1 Vaccine Request",
       eventType: "Vaccine Request",
       notes,
+      source: "manual", enteredBy: String(req.user?.id || ""), note: notes,
     });
 
     const lifecycleReceipt = await logLifecycleEventOnChain({
@@ -60,79 +61,23 @@ exports.requestVaccines = async (req, res) => {
 // 1.2 Stock Management / inventory update
 exports.updateInventory = async (req, res) => {
   try {
-    const {
-      centerId,
-      hospital,
-      batchId,
-      shipmentId,
-      vaccineType = "Mixed",
-      receivedDoses = 0,
-      stockBefore = 0,
-      notes = "",
-    } = req.body;
-
-    const stockAfter = safeNumber(stockBefore) + safeNumber(receivedDoses);
-
-    if (shipmentId) {
-      await Shipment.updateOne(
-        { shipmentId },
-        {
-          $set: {
-            status: "Delivered to Vaccination Center",
-            lastUpdatedAt: new Date(),
-          },
-          $push: {
-            statusHistory: {
-              status: "Delivered to Vaccination Center",
-              timestamp: new Date(),
-              txHash: "",
-            },
-          },
-        }
-      );
-    }
-
-    const inventory = await Vaccination.create({
-      centerId: centerId || hospital,
-      hospital: hospital || centerId,
-      shipmentId,
-      batchId,
-      vaccineType,
-      receivedDoses: safeNumber(receivedDoses),
-      stockBefore: safeNumber(stockBefore),
-      stockAfter,
-      requestStatus: "Fulfilled",
-      inventoryStatus: "Updated",
-      workflowStage: "1.2 Stock Management",
-      eventType: "Inventory Update",
-      notes,
-    });
-
-    const lifecycleReceipt = await logLifecycleEventOnChain({
-      batchId: batchId || shipmentId || String(inventory._id),
-      actorRole: "Vaccination Center",
-      action: "Stock Management",
-      location: centerId || hospital || "Vaccination Center",
-      details: vaccineType,
-      quantity: receivedDoses,
-    });
-    inventory.txHash = extractHash(lifecycleReceipt);
-    inventory.blockchainStatus = inventory.txHash ? "Logged" : "Pending";
-    await inventory.save();
-
-    if (batchId) {
-      await updateBatchStatusOnChain(batchId, "Delivered to Vaccination Center");
-    }
-
-    res.json(inventory);
+    // Inventory enters the hospital exactly once through the confirmed-delivery
+    // endpoint. Legacy callers may inspect that receipt, not invent new stock.
+    const stock = await confirmedBatchStock(req);
+    const receipt = stock.records.find(record => record.eventType === "Delivery Confirmation" && record.shipmentId === req.body.shipmentId);
+    if (!receipt) return res.status(409).json({ error: "Confirm the supplied shipment using the delivery receipt action before updating inventory" });
+    return res.json({ ...receipt, alreadyRecorded: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 };
 
 // 1.3 Administer vaccines
 exports.administerVaccines = async (req, res) => {
   try {
+    const replay = await administrationReplay(req, "administer");
+    if (replay) return res.json(replay);
+    await prepareAdministration(req);
     const {
       centerId,
       hospital,
@@ -146,16 +91,8 @@ exports.administerVaccines = async (req, res) => {
 
     const stockAfter = Math.max(0, safeNumber(stockBefore) - safeNumber(dosesUsed));
 
-    if (batchId) {
-      const batch = await Batch.findOne({ batchId });
-      if (batch) {
-        batch.quantity = Math.max(0, safeNumber(batch.quantity) - safeNumber(dosesUsed));
-        batch.status = "Administered";
-        await batch.save();
-      }
-    }
-
     const record = await Vaccination.create({
+      ...req.administrationOperation,
       centerId: centerId || hospital,
       hospital: hospital || centerId,
       batchId,
@@ -168,6 +105,7 @@ exports.administerVaccines = async (req, res) => {
       workflowStage: "1.3 Administer Vaccines",
       eventType: "Vaccination",
       notes,
+      source: "manual", enteredBy: String(req.user?.id || ""), note: notes,
     });
 
     const lifecycleReceipt = await logLifecycleEventOnChain({
@@ -184,17 +122,26 @@ exports.administerVaccines = async (req, res) => {
 
     if (batchId) {
       await updateBatchStatusOnChain(batchId, "Administered");
+      // Manufactured quantity stays unchanged; hospital usage is a separate ledger.
+      await Batch.updateOne({ batchId }, { $set: { status: "Administered" } });
     }
 
-    res.json(record);
+    await completeAdministrationOperation(record, record.toObject());
+    const result = record.toObject();
+    delete result.operationResult;
+    res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message, code: err.code });
   }
 };
 
 // 1.4 Record & Report to blockchain / health authority
 exports.recordAndReport = async (req, res) => {
   try {
+    const stock = await confirmedBatchStock(req);
+    const reportDoses = Number(req.body.dosesUsed);
+    if (!Number.isSafeInteger(reportDoses) || reportDoses <= 0 || reportDoses > stock.used) return res.status(400).json({ error: "Reports must refer to doses already administered in this hospital" });
+    req.body.vaccineType = stock.batch.vaccineType;
     const {
       centerId,
       hospital,
@@ -237,6 +184,7 @@ exports.recordAndReport = async (req, res) => {
       workflowStage: "1.4 Record & Report",
       eventType: "Vaccination Report",
       notes,
+      source: "manual", enteredBy: String(req.user?.id || ""), note: notes,
     });
 
     if (batchId) {
@@ -245,13 +193,16 @@ exports.recordAndReport = async (req, res) => {
 
     res.json(report);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 };
 
 // End-to-end vaccination center DFD flow
 exports.runVaccinationWorkflow = async (req, res) => {
   try {
+    const replay = await administrationReplay(req, "workflow");
+    if (replay) return res.json(replay);
+    await prepareAdministration(req);
     const {
       centerId = "City Hospital",
       hospital = centerId,
@@ -279,6 +230,7 @@ exports.runVaccinationWorkflow = async (req, res) => {
       workflowStage: "1.1 Vaccine Request",
       eventType: "Vaccine Request",
       notes,
+      source: "manual", enteredBy: String(req.user?.id || ""), note: notes,
     });
     const requestReceipt = await logLifecycleEventOnChain({
       batchId: batchId || String(request._id),
@@ -307,6 +259,7 @@ exports.runVaccinationWorkflow = async (req, res) => {
       workflowStage: "1.2 Stock Management",
       eventType: "Inventory Update",
       notes,
+      source: "manual", enteredBy: String(req.user?.id || ""), note: notes,
     });
     const inventoryReceipt = await logLifecycleEventOnChain({
       batchId: batchId || shipmentId || String(inventory._id),
@@ -325,6 +278,7 @@ exports.runVaccinationWorkflow = async (req, res) => {
 
     const stockAfterAdministration = Math.max(0, stockAfterDelivery - safeNumber(dosesUsed));
     const administration = await Vaccination.create({
+      ...req.administrationOperation,
       centerId,
       hospital,
       batchId,
@@ -337,6 +291,7 @@ exports.runVaccinationWorkflow = async (req, res) => {
       workflowStage: "1.3 Administer Vaccines",
       eventType: "Vaccination",
       notes,
+      source: "manual", enteredBy: String(req.user?.id || ""), note: notes,
     });
     const administrationReceipt = await logLifecycleEventOnChain({
       batchId: batchId || String(administration._id),
@@ -385,12 +340,13 @@ exports.runVaccinationWorkflow = async (req, res) => {
       workflowStage: "1.4 Record & Report",
       eventType: "Vaccination Report",
       notes,
+      source: "manual", enteredBy: String(req.user?.id || ""), note: notes,
     });
     if (batchId) {
       await updateBatchStatusOnChain(batchId, "Vaccination Recorded");
     }
 
-    res.json({
+    const result = {
       workflow: [
         { step: "1.1 Vaccine Request", status: request.requestStatus },
         { step: "1.2 Stock Management", status: inventory.inventoryStatus },
@@ -399,38 +355,28 @@ exports.runVaccinationWorkflow = async (req, res) => {
       ],
       request,
       inventory,
-      administration,
+      administration: administration.toObject(),
       report,
       txHash,
-    });
+    };
+    await completeAdministrationOperation(administration, result);
+    res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message, code: err.code });
   }
 };
 
 exports.createRecord = async (req, res) => {
-  try {
-    const record = await Vaccination.create(req.body);
-    const lifecycleReceipt = await logLifecycleEventOnChain({
-      batchId: req.body.batchId || String(record._id),
-      actorRole: "Vaccination Center",
-      action: req.body.eventType || "Create Vaccination Record",
-      location: req.body.centerId || req.body.hospital || "Vaccination Center",
-      details: req.body.notes || record.vaccineType || "Vaccination record created",
-      quantity: req.body.dosesUsed || req.body.receivedDoses || req.body.requestedDoses || 0,
-    });
-    record.txHash = extractHash(lifecycleReceipt);
-    record.blockchainStatus = record.txHash ? "Logged" : "Pending";
-    await record.save();
-    res.json(record);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  // Keep the legacy URL, but route it through the same stock and receipt guards.
+  if (req.body.eventType === "Vaccination Report") return exports.recordAndReport(req, res);
+  if (["Inventory Update", "Delivery Confirmation"].includes(req.body.eventType)) return exports.updateInventory(req, res);
+  if (!req.body.eventType || req.body.eventType === "Vaccination") return exports.administerVaccines(req, res);
+  return res.status(400).json({ error: "Use the vaccine request, confirmed delivery, administration, or report action for this event" });
 };
 
 exports.getRecords = async (_req, res) => {
   try {
-    const records = await Vaccination.find(_req.scope.vaccination).sort({ date: -1 });
+    const records = await Vaccination.find(_req.scope.vaccination).select("-operationResult -operationFingerprint").sort({ date: -1 });
     res.json(records);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -439,7 +385,7 @@ exports.getRecords = async (_req, res) => {
 
 exports.getWorkflowStatus = async (_req, res) => {
   try {
-    const records = await Vaccination.find(_req.scope.vaccination).sort({ date: -1 }).lean();
+    const records = await Vaccination.find(_req.scope.vaccination).select("-operationResult -operationFingerprint").sort({ date: -1 }).lean();
     const requests = records.filter((item) => item.workflowStage === "1.1 Vaccine Request");
     const inventory = records.filter((item) => item.workflowStage === "1.2 Stock Management");
     const administrations = records.filter((item) => item.workflowStage === "1.3 Administer Vaccines");

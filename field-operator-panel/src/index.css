@@ -247,6 +247,35 @@ body {
   }
 }
 
+@keyframes scene-parallax-scroll {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-100%, 0, 0);
+  }
+}
+
+@keyframes scene-truck-suspension {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate3d(0, 1px, 0) rotate(0.025deg);
+  }
+}
+
+@keyframes scene-brake-flash {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
 @keyframes scene-exhaust-rise {
   0% {
     transform: translateY(0) scale(1);
@@ -334,6 +363,13 @@ body {
   background: var(--color-scene-sky-top);
   isolation: isolate;
   --scene-road-duration: 1s;
+  --scene-loop-duration: 10s;
+  --scene-roadside-duration: 30s;
+  --scene-midground-duration: 100s;
+  --scene-far-duration: 240s;
+  --scene-city-opacity: 1;
+  --scene-hills-opacity: 0;
+  --scene-arrival-opacity: 0;
 }
 
 .scene-svg {
@@ -344,9 +380,53 @@ body {
 .scene-svg-mono {
   font-family: "JetBrains Mono", ui-monospace, monospace;
 }
+.scene-journey-hills {
+  opacity: var(--scene-hills-opacity);
+  transition: opacity 900ms ease-in-out;
+}
+.scene-journey-city {
+  opacity: var(--scene-city-opacity);
+  transition: opacity 900ms ease-in-out;
+}
+.scene-journey-arrival {
+  opacity: var(--scene-arrival-opacity);
+  transition: opacity 900ms ease-in-out;
+}
 .scene-truck-group {
   will-change: transform;
   transition: transform 420ms ease-out;
+}
+.scene-truck-motion {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+}
+.scene-scroll-loop {
+  transform-box: view-box;
+  transform-origin: 0 0;
+}
+.scene-moving .scene-truck-motion {
+  animation: scene-truck-suspension 2.2s ease-in-out infinite;
+}
+.scene-coasting .scene-truck-motion {
+  animation: scene-truck-suspension 750ms ease-out 1;
+}
+.scene-moving .scene-parallax-far,
+.scene-coasting .scene-parallax-far {
+  animation: scene-parallax-scroll var(--scene-far-duration) linear infinite;
+}
+.scene-moving .scene-parallax-mid,
+.scene-coasting .scene-parallax-mid {
+  animation: scene-parallax-scroll var(--scene-midground-duration) linear infinite;
+}
+.scene-moving .scene-parallax-roadside,
+.scene-coasting .scene-parallax-roadside {
+  animation: scene-parallax-scroll var(--scene-roadside-duration) linear infinite;
+}
+.scene-moving .scene-parallax-foreground,
+.scene-coasting .scene-parallax-foreground,
+.scene-moving .scene-road-texture-track,
+.scene-coasting .scene-road-texture-track {
+  animation: scene-parallax-scroll var(--scene-loop-duration) linear infinite;
 }
 .scene-wheel-rotation {
   transform-box: fill-box;
@@ -356,8 +436,15 @@ body {
   will-change: transform;
   animation: scene-wheel-rotate var(--wheel-speed) linear infinite;
 }
+.scene-coasting .scene-wheel-coasting {
+  will-change: transform;
+  animation: scene-wheel-rotate var(--wheel-speed) linear 1;
+}
 .scene-moving .scene-lane-track {
   animation: scene-road-scroll var(--scene-road-duration) linear infinite;
+}
+.scene-coasting .scene-lane-track {
+  animation: scene-road-scroll var(--scene-road-duration) linear 1;
 }
 .scene-lane-track {
   transform-box: fill-box;
@@ -368,7 +455,8 @@ body {
   transform-box: fill-box;
   transform-origin: center;
 }
-.scene-running-light {
+.scene-moving .scene-running-light,
+.scene-coasting .scene-running-light {
   animation: scene-running-light-pulse 1.5s ease-in-out infinite;
 }
 .scene-status-led {
@@ -383,6 +471,9 @@ body {
 .scene-quarantine-badge,
 .scene-quarantine-lamp {
   animation: scene-quarantine-pulse 1s ease-in-out infinite;
+}
+.scene-brake-flash {
+  animation: scene-brake-flash 450ms ease-in-out 2;
 }
 .scene-parked .scene-destination-pin {
   animation: scene-destination-float 3s ease-in-out infinite;

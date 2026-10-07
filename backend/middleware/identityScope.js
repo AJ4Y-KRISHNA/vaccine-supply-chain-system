@@ -1,7 +1,7 @@
 const Batch = require("../models/Batch");
 const Shipment = require("../models/Shipment");
 const normalize = value => String(value || "").trim().toLowerCase();
-const identityKeys = user => [...new Set([user.email, user[user.role === "healthcare" ? "hospital" : user.role], ...(user.organizationAliases || [])].map(normalize).filter(Boolean))];
+const identityKeys = user => [...new Set([user.email, user[user.role === "healthcare" ? "hospital" : user.role === "field_operator" ? "distributor" : user.role], ...(user.organizationAliases || [])].map(normalize).filter(Boolean))];
 const ownsIdentity = (user, value) => identityKeys(user).includes(normalize(value));
 const identityPatterns = user => identityKeys(user).map(key => new RegExp(`^\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i"));
 async function scopeData(req, res, next) {
@@ -14,7 +14,7 @@ async function scopeData(req, res, next) {
     const ownerFilter = req.user.role === "manufacturer" ? { manufacturer: { $in: patterns } } : null;
     const batches = ownerFilter ? await Batch.find(ownerFilter).select("batchId").lean() : [];
     const shipment = ownerFilter ? { batchId: { $in: batches.map(b => b.batchId) } }
-      : { [req.user.role === "distributor" ? "distributor" : "destination"]: { $in: patterns } };
+      : { [req.user.role === "distributor" || req.user.role === "field_operator" ? "distributor" : "destination"]: { $in: patterns } };
     const shipments = await Shipment.find(shipment).select("shipmentId batchId destination").lean();
     const batchIds = [...new Set([...batches.map(b => b.batchId), ...shipments.map(s => s.batchId)])];
     const relatedBatch = { batchId: { $in: batchIds } };

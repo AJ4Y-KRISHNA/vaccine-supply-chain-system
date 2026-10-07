@@ -1,5 +1,6 @@
 const TemperatureLog = require("../models/TemperatureLog");
-const { persistTemperatureLogs } = require("../services/telemetryService");
+const LocationHistory = require("../models/LocationHistory");
+const { persistTemperatureLogs, buildIdempotencyKey } = require("../services/telemetryService");
 const { connect, close, fixture } = require("./helpers/coldChainFixture");
 
 beforeAll(connect, 15000);
@@ -9,6 +10,7 @@ function sequencedReading(f, sequenceNumber) {
   const { timestamp, ...reading } = f.reading(5, 0);
   return {
     ...reading,
+    location: { lat: reading.latitude, lng: reading.longitude },
     recordedAt: new Date(timestamp),
     sequenceNumber,
   };
@@ -30,9 +32,20 @@ test("a normal sequenced sensor reading creates one temperature log", async () =
   expect(saved.batchId).toBe(f.batchId);
   expect(saved.sequenceNumber).toBe(1);
   expect(await TemperatureLog.countDocuments({ batchId: f.batchId })).toBe(1);
+  expect(await LocationHistory.findOne({ temperatureLogId: saved._id }).lean()).toMatchObject({
+    batchId: f.batchId, shipmentId: f.shipmentId, sequenceNumber: 1,
+    location: { lat: 9, lng: 76 },
+  });
 });
 
-test("retrying the same device, batch, timestamp and sequence returns the existing log", async () => {
+test("idempotency identity is device ID plus sequence, independent of timestamp and batch fields", async () => {
+  expect(buildIdempotencyKey({ deviceId: "DEVICE-1", sequenceNumber: 42, batchId: "BATCH-A", recordedAt: new Date() }))
+    .toBe(buildIdempotencyKey({ deviceId: "DEVICE-1", sequenceNumber: 42, batchId: "BATCH-B", recordedAt: new Date(Date.now() - 60000) }));
+  expect(buildIdempotencyKey({ deviceId: "DEVICE-1", sequenceNumber: 43 })).not.toBe(buildIdempotencyKey({ deviceId: "DEVICE-1", sequenceNumber: 42 }));
+  expect(buildIdempotencyKey({ deviceId: "DEVICE-2", sequenceNumber: 42 })).not.toBe(buildIdempotencyKey({ deviceId: "DEVICE-1", sequenceNumber: 42 }));
+});
+
+test("retrying the same device and sequence returns the existing log", async () => {
   const f = await fixture();
   const reading = sequencedReading(f, 4);
   const [first] = await persistTemperatureLogs([reading]);
@@ -40,6 +53,7 @@ test("retrying the same device, batch, timestamp and sequence returns the existi
 
   expect(String(retry._id)).toBe(String(first._id));
   expect(await TemperatureLog.countDocuments({ batchId: f.batchId })).toBe(1);
+  expect(await LocationHistory.countDocuments({ temperatureLogId: first._id })).toBe(1);
 });
 
 test("retry after a post-insert processing failure resumes the existing log", async () => {

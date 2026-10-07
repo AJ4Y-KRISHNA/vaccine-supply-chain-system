@@ -90,7 +90,7 @@ test("brief alerts route detailed in-app notifications only to the batch owner a
   expect(notice.message).toContain("Source: Manual sensor override");
   expect(notice.metadata).toMatchObject({ source: "manual-override", overrideId: "OVR-TEST", shipmentId: f.shipmentId,
     batchId: f.batchId, distributor: "dist-a", hospital: "hospital-a", metric: "TEMPERATURE", breachedLimit: 8,
-    sourceLabel: "Manual sensor override", deepLink: "/distributor#shipment-journey" });
+    sourceLabel: "Manual sensor override", deepLink: `/distributor?batchId=${encodeURIComponent(f.batchId)}#shipment-journey` });
   expect((await list(otherMaker)).body.total).toBe(0);
   expect((await list(otherDistributor)).body.total).toBe(0);
 });

@@ -26,37 +26,19 @@
 .live-shipment--critical .live-shipment__state-dot { @apply bg-rose-600; }
 .live-shipment--unknown .live-shipment__state { @apply border-slate-200 bg-slate-50 text-slate-700; }
 .live-shipment--unknown .live-shipment__state-dot { @apply bg-slate-400; }
-.live-shipment__scene-link { @apply block rounded-lg outline-none; }
-.live-shipment__scene { @apply overflow-hidden rounded-lg border border-slate-200 bg-slate-50 px-2 pt-1; }
-.live-shipment__svg { @apply block h-auto w-full; min-height: 130px; }
-.live-shipment__ground { fill: theme("colors.emerald.50"); }
-.live-shipment__road { stroke: theme("colors.slate.400"); stroke-width: 29; }
-.live-shipment__road-line { stroke: white; stroke-width: 1.5; stroke-dasharray: 12 10; }
-.live-shipment__route-track { stroke: theme("colors.emerald.400"); stroke-width: 2; stroke-dasharray: 4 7; }
-.live-shipment__destination { fill: white; stroke: theme("colors.emerald.700"); stroke-width: 3; }
-.live-shipment__destination-label { fill: theme("colors.slate.600"); font: 700 8px sans-serif; letter-spacing: .08em; }
-.live-shipment__truck { transition: transform 850ms ease; }
-.live-shipment__cargo { fill: white; stroke: theme("colors.emerald.700"); stroke-width: 2; }
-.live-shipment__cab { fill: theme("colors.emerald.100"); stroke: theme("colors.emerald.700"); stroke-width: 2; }
-.live-shipment__window { fill: theme("colors.emerald.600"); }
-.live-shipment__wheel { fill: theme("colors.slate.800"); }
-.live-shipment__wheel-inner { fill: theme("colors.slate.200"); }
-.live-shipment__truck-label { fill: theme("colors.slate.700"); font: 700 8px sans-serif; letter-spacing: .04em; }
-.live-shipment__status-light { fill: theme("colors.slate.400"); transform-box: fill-box; transform-origin: center; }
-.live-shipment--normal .live-shipment__status-light { fill: theme("colors.emerald.600"); }
-.live-shipment--warning .live-shipment__status-light { fill: theme("colors.amber.500"); }
-.live-shipment--critical .live-shipment__status-light { fill: theme("colors.rose.600"); }
-.live-shipment--alert-active .live-shipment__status-light { animation: live-shipment-pulse 1.1s ease-in-out infinite alternate; }
-.live-shipment__gauges { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; font: 6px sans-serif; color: theme("colors.slate.800"); }
-.live-shipment__gauge { display: grid; grid-template-columns: auto 1fr; column-gap: 3px; align-items: center; min-width: 0; }
-.live-shipment__gauge-label { font-weight: 800; }
-.live-shipment__gauge strong { font-size: 7px; text-align: right; }
-.live-shipment__gauge-track { position: relative; grid-column: 1 / -1; height: 3px; margin: 1px 0; overflow: visible; border-radius: 9px; background: theme("colors.slate.200"); }
-.live-shipment__gauge-band { position: absolute; inset-block: 0; border-radius: inherit; background: theme("colors.emerald.500"); }
-.live-shipment__gauge-marker { position: absolute; top: 50%; width: 5px; height: 5px; border: 1px solid white; border-radius: 50%; background: theme("colors.slate.900"); transform: translate(-50%, -50%); }
-.live-shipment__gauge-range { grid-column: 1 / -1; overflow: hidden; color: theme("colors.slate.600"); text-overflow: ellipsis; white-space: nowrap; }
-.live-shipment__scene-foot { @apply flex flex-wrap items-center justify-between gap-x-4 gap-y-1 pb-2 text-xs text-slate-600; }
-.live-shipment__scene-foot span:nth-child(2) { @apply inline-flex items-center gap-1; }
+.live-shipment__map-wrap { @apply overflow-hidden rounded-lg border border-slate-200 bg-slate-50; }
+.live-shipment__map-status { @apply border-b border-slate-200 px-3 py-2 text-xs text-slate-600; }
+.live-shipment__map-status--error { @apply border-amber-200 bg-amber-50 text-amber-900; }
+.shipment-map { position: relative; min-width: 0; background: theme("colors.slate.100"); }
+.shipment-map .leaflet-container { z-index: 0; width: 100%; height: 260px; background: theme("colors.slate.200"); font-family: Inter, "Segoe UI", Arial, sans-serif; font-size: 12px; line-height: 1.4; }
+.shipment-map--compact .leaflet-container { height: 190px; }
+.shipment-map__caption { @apply flex flex-wrap justify-between gap-x-3 gap-y-1 border-t border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-600; }
+.shipment-map--empty { @apply flex min-h-[190px] flex-col items-center justify-center gap-2 bg-slate-50 px-4 py-6 text-center text-sm text-slate-700; }
+.shipment-map--empty small { @apply max-w-md text-xs text-slate-500; }
+.shipment-map--empty.shipment-map--compact { @apply min-h-[150px]; }
+.shipment-map .leaflet-control-attribution { font-size: 9px; }
+.shipment-map .leaflet-control-attribution a { color: theme("colors.emerald.800"); }
+.shipment-map .leaflet-popup-content { margin: 8px 10px; }
 .live-shipment__readings { @apply grid grid-cols-2 gap-2 text-xs text-slate-600 sm:grid-cols-4; }
 .live-shipment__readings span { @apply rounded-lg bg-slate-50 px-3 py-2; }
 .live-shipment__readings strong { @apply mr-1 text-sm font-semibold text-slate-900; }
@@ -75,13 +57,3 @@
 .live-shipment__disclaimer { @apply text-xs text-slate-600; }
 .live-shipment--compact .live-shipment__list { @apply grid gap-3; }
 .live-shipment--compact .live-shipment__card { @apply p-3; }
-
-@keyframes live-shipment-pulse { from { transform: scale(1); } to { transform: scale(1.45); } }
-
-@media (prefers-reduced-motion: reduce) {
-  .live-shipment__truck { transition: none; }
-  .live-shipment__status-light { animation: none !important; }
-}
-
-.live-shipment[data-reduced-motion="true"] .live-shipment__truck { transition: none; }
-.live-shipment[data-reduced-motion="true"] .live-shipment__status-light { animation: none !important; }

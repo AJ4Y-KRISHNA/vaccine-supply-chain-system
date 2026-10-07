@@ -2,6 +2,8 @@ const mongoose = require("mongoose");
 
 const ShipmentSchema = new mongoose.Schema({
   shipmentId: String,
+  vehicleId: String,
+  routeId: String,
   orderId: String,
   batchId: String,
   coldChainHoldAlertIds: { type: [String], default: undefined },
@@ -34,6 +36,9 @@ const ShipmentSchema = new mongoose.Schema({
       status: String,
       timestamp: { type: Date, default: Date.now },
       txHash: String,
+      source: { type: String, enum: ["simulator", "manual", "csv"], default: "simulator" },
+      enteredBy: String,
+      note: String,
     }
   ],
 

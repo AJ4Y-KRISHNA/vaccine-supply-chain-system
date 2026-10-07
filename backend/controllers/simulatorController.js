@@ -5,7 +5,7 @@ const {
   SCENARIOS,
   SimulationNotFoundError,
 } = require("../services/iotSimulator");
-const { persistSimulationReading } = require("../services/telemetryService");
+const { postSimulationReading } = require("../services/simulatorTelemetryTransport");
 
 const { DurableSimulatorManager } = require("../services/durableSimulator");
 const simulatorManager = new DurableSimulatorManager();
@@ -20,8 +20,8 @@ const deviceSchema = Joi.object({
   vehicleId: Joi.string().trim().max(120).allow(""),
   batchId: Joi.string().trim().max(120).allow(""),
   shipmentId: Joi.string().trim().max(120).allow(""),
-  scenario: Joi.string().uppercase().valid(...SCENARIOS).default("NORMAL"),
-  seed: Joi.alternatives().try(Joi.string().max(200), Joi.number()).default("1"),
+  scenario: Joi.string().uppercase().valid(...SCENARIOS).default(process.env.SIMULATOR_SCENARIO || "NORMAL"),
+  seed: Joi.alternatives().try(Joi.string().max(200), Joi.number()).default(process.env.SIMULATOR_SEED || "1"),
   startTime: Joi.date().iso().default(DEFAULT_START_TIME),
   tickIntervalMs: Joi.number().integer().min(10).max(3600000).default(DEFAULT_TICK_INTERVAL_MS),
   route: Joi.array().items(routePointSchema).min(2).max(1000),
@@ -54,7 +54,7 @@ exports.createVirtualDevice = async (req, res) => {
 
 exports.startSimulation = async (req, res) => {
   try {
-    const simulation = await simulatorManager.start(req.params.deviceId, persistSimulationReading, req.user.id);
+    const simulation = await simulatorManager.start(req.params.deviceId, postSimulationReading, req.user.id);
     return res.json({ message: "Simulation started", simulation });
   } catch (error) {
     return sendError(res, error);
@@ -73,7 +73,7 @@ exports.stopSimulation = async (req, res) => {
 
 exports.tickSimulation = async (req, res) => {
   try {
-    const result = await simulatorManager.tickOnce(req.params.deviceId, persistSimulationReading, req.user.id);
+    const result = await simulatorManager.tickOnce(req.params.deviceId, postSimulationReading, req.user.id);
     return res.json({ message: "Simulation tick persisted", ...result });
   } catch (error) {
     return sendError(res, error);

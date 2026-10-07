@@ -1,46 +1,39 @@
 const TemperatureLog = require("../models/TemperatureLog");
 const { persistTemperatureLogs } = require("../services/telemetryService");
 
-const Joi = require("joi");
+const { normalizeOrCreateCorrelationId } = require("../services/correlationContext");
+const logger = require("../services/structuredLogger");
+const { tempSchema, validateTelemetry } = require("../services/telemetryValidation");
 
-const tempSchema = Joi.array().items(
-  Joi.object({
-    shipmentId: Joi.string().allow(""),
-    batchId: Joi.string().allow(""),
-    sensorId: Joi.string().allow(""),
-    deviceId: Joi.string().allow(""),
-    vehicleId: Joi.string().allow(""),
-    sequenceNumber: Joi.number().integer().min(0),
-    temperature: Joi.number().min(-100).max(100).required(),
-    humidity: Joi.number().min(0).max(100),
-    batteryLevel: Joi.number().min(0).max(100),
-    recordedAt: Joi.date().iso(),
-    status: Joi.string().valid("Normal", "Alert").default("Normal"),
-    location: Joi.object({
-      lat: Joi.number(),
-      lng: Joi.number(),
-    }).optional(),
-    simulation: Joi.object({
-      source: Joi.string().allow(""),
-      scenario: Joi.string().allow(""),
-      seed: Joi.string().allow(""),
-      tick: Joi.number().integer().min(0),
-    }).optional(),
-  })
-);
+async function ingestTelemetryPayload(input, options = {}) {
+  const payload = Array.isArray(input) ? input : [input];
+  const { error, value } = validateTelemetry(payload);
+  if (error) {
+    const failure = Object.assign(new Error(error.details.map((detail) => detail.message).join("; ")), { status: 400 });
+    throw failure;
+  }
+  const headerCorrelationId = options.correlationId ? normalizeOrCreateCorrelationId(options.correlationId) : null;
+  const withCorrelation = value.map(reading => ({
+    ...reading,
+    correlationId: normalizeOrCreateCorrelationId(headerCorrelationId || reading.correlationId),
+  }));
+  logger.info("telemetry.ingestion.accepted", { correlationId: headerCorrelationId || withCorrelation[0]?.correlationId,
+    readingCount: withCorrelation.length, transport: options.transport || "http" });
+  return persistTemperatureLogs(withCorrelation);
+}
 
 exports.ingestLog = async (req, res) => {
   try {
-    const payload = Array.isArray(req.body) ? req.body : [req.body];
-    const { error, value } = tempSchema.validate(payload, { abortEarly: false });
-    if (error) return res.status(400).json({ error: error.details.map((d) => d.message) });
-
-    const docs = await persistTemperatureLogs(value);
+    const docs = await ingestTelemetryPayload(req.body, { correlationId: req.correlationId, transport: "http" });
     res.json(docs);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    logger.warn("telemetry.ingestion.rejected", { correlationId: req.correlationId, statusCode: err.status || 500 });
+    res.status(err.status || 500).json({ error: err.message });
   }
 };
+
+exports.ingestTelemetryPayload = ingestTelemetryPayload;
+exports.tempSchema = tempSchema;
 
 exports.getLogs = async (_req, res) => {
   try {

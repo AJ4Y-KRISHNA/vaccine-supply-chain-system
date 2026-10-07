@@ -1,7 +1,7 @@
 import React from "react";
 
-export default function OrderAllocationFields({ order, options, distributors, value = {}, onChange }) {
-  const disabled = order.status !== "Pending";
+export default function OrderAllocationFields({ order, options = [], distributors = [], value = {}, onChange, busy = false }) {
+  const disabled = order.status !== "Pending" || busy;
   const choices = options.filter(batch => batch.vaccineType === order.vaccineType);
   return <fieldset disabled={disabled} className="space-y-2">
     <label className="block text-xs text-[#60748f]">
@@ -12,7 +12,7 @@ export default function OrderAllocationFields({ order, options, distributors, va
         <option value="">Select a released, eligible batch</option>
         {choices.map((batch, index) => <option key={`${batch.batchId}-${index}`} value={batch.batchId}
           disabled={!batch.eligible || batch.remainingDoses < order.requestedDoses}>
-          {batch.batchId} — {batch.remainingDoses} available{!batch.eligible ? ` (${batch.reasons.join(", ")})` : ""}
+          {batch.batchId} — {batch.remainingDoses} available{!batch.eligible ? ` (${(batch.reasons || []).join(", ") || "Not eligible"})` : batch.remainingDoses < order.requestedDoses ? " (Insufficient doses)" : ""}
         </option>)}
       </select>
     </label>
@@ -27,6 +27,7 @@ export default function OrderAllocationFields({ order, options, distributors, va
     </label>
     {!disabled && !choices.some(b => b.eligible && b.remainingDoses >= order.requestedDoses) &&
       <p role="status" className="text-xs text-amber-800">No eligible batch with sufficient doses. Review release, ownership, quarantine and data-integrity issues before approval.</p>}
+    {!disabled && !distributors.length && <p className="text-xs text-amber-800">No mapped distributor is available. Configure a distributor identity before approval.</p>}
     {order.allocatedBatchId && <p className="text-xs">Allocated: {order.allocatedBatchId} / {order.shipmentId}</p>}
   </fieldset>;
 }

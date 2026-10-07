@@ -1,32 +1,30 @@
-# Live shipment visualizer
+# Shipment GPS history and live shipment view
 
 ## Scope
 
-This is a software-only, read-only visualization of persisted shipment workflow and sensor records. The SVG road and vehicle are illustrative. It does not represent a physical truck or a live mapping/GPS feed.
+This is a software-only, read-only visualization of role-visible shipment workflow, sensor readings and stored simulated GPS coordinates. It does not represent a physical truck or a live GPS feed. Route lines connect consecutive saved coordinates with straight segments; they are not road-routed or map-matched, and do not prove the vehicle visited the shipment destination.
 
-## Integration
+## Data sources and authorization
 
-- GET /api/live-shipments requires an authenticated user and applies identityScope.scopeData to shipment, batch, and telemetry queries.
-- The endpoint returns a maximum of 100 role-visible shipments, supports limit and an optional exact shipmentId, and returns 404 when a requested shipment is not visible to the current organization.
-- Policy values come only from the approved ColdChainPolicy referenced by the batch. Latest telemetry is joined only on an exact shipmentId; batch-only telemetry is not attributed to an individual shipment.
-- Related alert detail comes from the existing GET /api/alerts endpoint, retaining its role-targeted alert visibility.
+- `GET /api/live-shipments` requires authentication and applies identity-scope filters to shipments, batches and telemetry. It returns at most 100 visible shipments and can filter on an exact `shipmentId`.
+- Latest telemetry is joined only on an exact shipment ID. Batch-only telemetry is not attributed to a specific shipment.
+- `GET /api/location-history/:batchId?limit=500` requires authentication and batch-read authorization. The backend returns chronological `LocationHistory` entries scoped to a batch.
+- The frontend links GPS points to a shipment only when the saved `shipmentId` matches. A legacy point without a shipment ID is shown only when the returned shipment list has a single shipment for that batch; ambiguous points are omitted.
+- Alert explanations continue to come from the existing role-targeted `GET /api/alerts` feed.
 
-## Display rules
+## Map behavior
 
-The truck fixed position maps the persisted workflow stage: pending 6%, verified 28%, in transit/dispatched 58%, supplied to the vaccination center 82%, and delivered/confirmed 100%. It does not move on a timer. A delivery/confirmation or quarantine/hold leaves the truck stationary.
+The shipment card displays the stored GPS history as a Leaflet polyline on OpenStreetMap tiles. The first point is marked as the start and the most recent stored point is marked as latest; sampled intermediate points can be opened to inspect their timestamp and vehicle ID. The latest exact-shipment reading is used as a current-location fallback when no history point exists or when it is newer than the saved history. The destination is shown as text only because the active shipment record does not provide a geocoded destination coordinate.
 
-Temperature and humidity gauge ranges are shown only when present in the batch approved policy. Green indicates the latest measurements are within configured ranges; amber indicates an out-of-range measurement, unresolved visible alert, or configured critical battery condition; red indicates quarantine/quality hold; gray means required policy or telemetry is unavailable. These are display states, not a vaccine-safety determination.
-
-The saved coordinate, when present, is labeled simulated GPS. It is not used to imply a map-matched route. Every instance is labeled Simulated.
+If no valid GPS coordinate exists, the card explains that no map position is available and points the operator to the software sensor simulator. If the history API is unavailable, the card shows that error and may still display the latest location returned by the shipment feed. OpenStreetMap tiles require browser network access and are subject to OpenStreetMap tile-service availability and usage policy; the saved coordinates and routes remain application data.
 
 ## Placement and interaction
 
-- Dedicated route: /live-shipments, available to Admin, Manufacturer, Distributor, and Healthcare Professional accounts. A shipmentId query parameter opens one visible shipment directly.
-- Admin and Distributor dashboards display three shipment lanes initially. The dedicated route displays five and expands in capped groups of five.
-- The Admin manual simulator console displays the selected shipment. Selecting the vehicle or its details link opens the same detail route and related alert explanation.
-- Refresh occurs every eight seconds while the page is visible. Polling is paused while the browser tab is hidden.
-- Truck motion uses a transform transition. The operating-system reduced-motion preference disables the transition and alert pulse; the view remains readable without animation.
+- Admin and Distributor dashboards show up to three visible shipment cards; Manufacturer now has the same role-scoped shipment GPS section.
+- The dedicated `/live-shipments` page is available to Admin, Manufacturer, Distributor and Healthcare Professional accounts. A `shipmentId` query parameter opens a single visible shipment.
+- The dashboard refreshes shipment and alert data every eight seconds while the browser tab is visible. Location history is fetched for batches represented in the currently visible cards.
+- Sensor values, policy range, battery, alert details and status remain shown separately from the map. Status colors are informational, not a vaccine-safety determination.
 
 ## Verification
 
-backend/tests/liveShipmentRoutes.test.js covers authentication, latest exact-shipment reading selection, approved policy projection, and organization scoping. frontend/src/__tests__/LiveShipmentApi.test.js checks request parameters. frontend/src/__tests__/LiveShipmentVisualizer.test.js covers progress/state mapping, hold/delivery stopping, alert details, detail links, show-more behavior, and reduced motion.
+`backend/tests/locationHistoryRoutes.test.js` and the telemetry/location idempotency tests cover authorized chronological GPS history. `frontend/src/__tests__/LiveShipmentApi.test.js` checks the history API request. `frontend/src/__tests__/ShipmentLocationMap.test.js` covers coordinate validation, and `frontend/src/__tests__/LiveShipmentVisualizer.test.js` covers shipment-to-history filtering, map state, role-visible card loading, alerts and detail links.

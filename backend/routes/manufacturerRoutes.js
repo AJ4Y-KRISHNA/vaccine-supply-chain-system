@@ -28,7 +28,11 @@ router.post("/batch/report", requireIdentity, protectOperation(["admin", "manufa
 router.post("/batch/:batchId/sign-release", requireIdentity, protectOperation(["admin", "manufacturer"], signBatchRelease));
 
 // Full DFD workflow
-router.post("/workflow", requireIdentity, protectOperation(["admin", "manufacturer"], runManufacturerWorkflow, { allowNewBatch: true, newBatchOnly: true }));
+router.post("/workflow", requireIdentity, (req, _res, next) => {
+  // Canonicalize before ownership/hold/duplicate checks and the per-batch lock.
+  if (typeof req.body?.batchId === "string") req.body.batchId = req.body.batchId.trim();
+  next();
+}, protectOperation(["admin", "manufacturer"], runManufacturerWorkflow, { allowNewBatch: true, newBatchOnly: true }));
 
 // Monitoring endpoint
 router.get("/batches", authenticate, getBatchDetails);

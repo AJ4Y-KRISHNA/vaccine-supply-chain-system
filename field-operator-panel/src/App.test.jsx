@@ -1,11 +1,11 @@
 import React from "react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App.jsx";
 import { useFieldOperatorStore } from "./stores/fieldOperatorStore.js";
 
 vi.mock("./components/ShipmentAccessPanel.jsx", () => ({ default: () => null }));
-vi.mock("./hooks/useFieldOperatorSocket.js", () => ({ default: () => null }));
+vi.mock("./hooks/useFieldOperatorSocket.js", () => ({ default: () => ({ sendCommand: vi.fn() }) }));
 vi.mock("./components/TruckRoadScene.jsx", () => ({
   default: ({ temperature, humidity, progress, statusColor }) => (
     <div
@@ -25,6 +25,9 @@ vi.mock("./components/TelemetryGauges.jsx", () => ({
       data-policy-max={policy?.maximumTemperature}
     />
   ),
+}));
+vi.mock("./components/SensorHistoryCharts.jsx", () => ({
+  default: () => <div data-testid="sensor-history-charts" />,
 }));
 vi.mock("./components/ShipmentMap.jsx", () => ({
   default: ({ currentLocation, routePoints, routeSource }) => (
@@ -52,13 +55,24 @@ afterEach(() => {
     initMessage: null,
     telemetry: null,
     readingHistory: [],
+    alerts: [],
     progress: null,
     coldChainStatus: "unknown",
+    activeOverride: null,
+    overrideResult: null,
     simulationClock: null,
   });
 });
 
 describe("Step 5 live data binding", () => {
+  it("makes the synthetic simulation clock explicit even before a sensor sample arrives", () => {
+    render(<App />);
+
+    const clockNotice = screen.getByText("Simulation clock:").closest('[role="status"]');
+    expect(clockNotice).toHaveTextContent(/Simulation clock:\s*waiting for sensor data/);
+    expect(clockNotice).toHaveTextContent(/Synthetic time; it may differ from your computer’s clock\./);
+  });
+
   it("uses the authorized REST latest sample as a fallback for readings and the current map marker", async () => {
     useFieldOperatorStore.setState({
       accessToken: "test-token",
@@ -167,5 +181,50 @@ describe("Step 5 live data binding", () => {
     expect(screen.getByTestId("truck-scene")).toHaveAttribute("data-progress", "42");
     expect(screen.getByText("Depot")).toBeInTheDocument();
     expect(screen.getByText("Clinic A")).toBeInTheDocument();
+  });
+
+  it("shows an unacknowledged critical banner, unread badge, and local acknowledgement action", () => {
+    useFieldOperatorStore.setState({
+      selectedShipmentId: "SHIP-ALERT",
+      alerts: [
+        {
+          alertId: "ALERT-CRITICAL",
+          shipmentId: "SHIP-ALERT",
+          severity: "critical",
+          metric: "temperature",
+          value: 10.8,
+          limit: 8,
+          duration: 18,
+          message: "Temperature exceeded the approved maximum for 18 minutes.",
+          simulationClock: "2026-01-01T00:18:00.000Z",
+          read: false,
+          acknowledged: false,
+        },
+      ],
+    });
+
+    render(<App />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Unacknowledged critical event");
+    expect(screen.getByRole("link", { name: "1 unread alert" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Acknowledge locally" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText("Acknowledged locally")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Alert feed" })).toBeInTheDocument();
+  });
+
+  it("turns the truck scene red when a streamed reading reports quarantine", () => {
+    useFieldOperatorStore.setState({
+      selectedShipmentId: "SHIP-QUARANTINED",
+      shipmentLoadStatus: "ready",
+      shipments: [{ shipmentId: "SHIP-QUARANTINED", batchId: "BATCH-Q" }],
+      telemetry: { temperature: 12, humidity: 55, battery: 95, status: "QUARANTINED" },
+      coldChainStatus: "QUARANTINED",
+      initMessage: { policyLimits: { tempMin: 2, tempMax: 8 } },
+    });
+
+    render(<App />);
+
+    expect(screen.getByTestId("truck-scene")).toHaveAttribute("data-status", "red");
   });
 });

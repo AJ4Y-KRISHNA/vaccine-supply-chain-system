@@ -6,6 +6,7 @@ const { inventorySnapshot, isDoseCount } = require("../services/inventoryEligibi
 const allocationService = require("../services/orderAllocationService");
 const Vaccination = require("../models/Vaccination");
 const { getForecast, getSentiment } = require("../services/aiService");
+const ColdChainAudit = require("../models/ColdChainAudit");
 
 function safeNumber(value, fallback = 0) {
   const parsed = Number(value);
@@ -109,6 +110,9 @@ exports.createHospitalOrder = async (req, res) => {
       requestedDoses: safeNumber(requestedDoses),
       priority,
       notes,
+      source: req.body.source === "csv" ? "csv" : "manual",
+      enteredBy: String(req.user?.id || req.user?._id || ""),
+      note: notes,
       status: "Pending",
       sentimentScore,
       sentimentLabel,
@@ -118,6 +122,11 @@ exports.createHospitalOrder = async (req, res) => {
       distributorVisible: false,
       blockchainStatus: "Pending",
     });
+    await ColdChainAudit.create({ batchId: auditBatchId, correlationId: req.correlationId,
+      action: req.body.source === "csv" ? "CSV order imported" : "Manual order created",
+      actorId: String(req.user?.id || req.user?._id || "system"), reason: notes || "Manual order entry",
+      eventTime: order.createdAt || new Date(), snapshot: { source: order.source, enteredBy: order.enteredBy,
+        orderId: order.orderId, requestedDoses: order.requestedDoses, note: notes } });
 
     await createNotification({
       recipientRole: "healthcare",
@@ -168,6 +177,25 @@ exports.getHospitalOrders = async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+};
+
+exports.importOrders = async (req, res) => {
+  try {
+    const csv = require("./manualReadingController")._test.parseCsv(Buffer.isBuffer(req.body) ? req.body.toString("utf8") : String(req.body || ""));
+    if (csv.length > 5000) return res.status(413).json({ error: "CSV upload is limited to 5,000 data rows" });
+    const results = [];
+    for (const row of csv) {
+      let statusCode = 201, body;
+      const response = { status(code) { statusCode = code; return this; }, json(value) { body = value; return this; } };
+      await exports.createHospitalOrder({ ...req, body: { ...row, requestedDoses: Number(row.requesteddoses), source: "csv",
+        hospital: row.hospital || row.centerid, centerId: row.centerid, vaccineType: row.vaccinetype,
+        region: row.region, priority: row.priority, notes: row.notes || row.note || "CSV order import" } }, response);
+      results.push(statusCode >= 400 ? { row: row.__row, status: "rejected", reason: body?.error || "Order rejected" }
+        : { row: row.__row, status: "accepted", orderId: body?.orderId, source: "csv" });
+    }
+    return res.json({ accepted: results.filter(row => row.status === "accepted").length,
+      rejected: results.filter(row => row.status === "rejected").length, results });
+  } catch (error) { return res.status(error.status || 400).json({ error: error.message }); }
 };
 
 exports.getAdminOrders = async (_req, res) => {

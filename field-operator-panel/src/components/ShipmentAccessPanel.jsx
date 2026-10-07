@@ -7,6 +7,7 @@ const ROLES = [
   ["admin", "Admin"],
   ["manufacturer", "Manufacturer"],
   ["distributor", "Distributor"],
+  ["field_operator", "Field Operator"],
   ["healthcare", "Healthcare professional"],
 ];
 

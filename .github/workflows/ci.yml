@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-accept:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+      - name: Install Node dependencies
+        run: |
+          npm ci --prefix backend
+          npm ci --prefix blockchain
+          npm ci --prefix frontend --legacy-peer-deps
+          pnpm --dir field-operator-panel install --frozen-lockfile
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r ai-services/requirements.txt pytest
+      - name: Compose end-to-end acceptance
+        run: node scripts/acceptance.js
+      - name: Lint and syntax checks
+        run: |
+          node scripts/lint.js
+          pnpm --dir field-operator-panel lint
+          python -m compileall -q ai-services
+      - name: Backend unit tests
+        working-directory: backend
+        env:
+          NODE_ENV: test
+          EVENT_BACKBONE_ENABLED: "false"
+          MONGO_TEST_URI: mongodb://127.0.0.1:27019/?replicaSet=rs-test&directConnection=true
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: "6380"
+          MQTT_URL: mqtt://127.0.0.1:1884
+          RPC_URL: http://127.0.0.1:18545
+          SIMULATOR_TRANSPORT: http
+          SIMULATOR_HTTP_TIMEOUT_MS: "20000"
+          AI_BASE_URL: http://127.0.0.1:18000
+          AI_ANOMALY_TIMEOUT_MS: "750"
+        run: |
+          docker compose -f ../docker-compose.yml stop backend worker edge-gateway ai-service
+          docker compose -f ../docker-compose.test.yml up -d --build --wait --wait-timeout 360 mongo-test redis-test mosquitto-test hardhat-test ai-test
+          node node_modules/jest/bin/jest.js --runInBand --testTimeout=180000
+          docker compose -f ../docker-compose.test.yml stop mongo-test redis-test mosquitto-test hardhat-test ai-test
+      - name: Frontend unit tests and production build
+        env:
+          CI: "true"
+        run: |
+          npm test --prefix frontend -- --watchAll=false --runInBand
+          npm run build --prefix frontend
+      - name: Field operator unit tests and build
+        run: |
+          pnpm --dir field-operator-panel test
+          pnpm --dir field-operator-panel build
+      - name: AI service unit tests
+        working-directory: ai-services
+        run: python -m pytest -q
+      - name: Local Hardhat contract tests
+        run: npm test --prefix blockchain
+      - name: Synthetic evaluation report
+        run: node scripts/evaluate.js
+      - name: Upload synthetic evaluation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-evaluation-results
+          path: results/*.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Stop ephemeral CI services and remove CI-only volumes
+        if: always()
+        run: |
+          docker compose -f docker-compose.test.yml down --volumes --remove-orphans
+          docker compose down --volumes --remove-orphans

@@ -1,8 +1,2 @@
-import React from "react";
-import Dashboard from "./components/Dashboard";
-
-function App() {
-  return <Dashboard />;
-}
-
-export default App;
+// Backward-compatible import path; use the real authenticated application.
+export { default } from "../App";

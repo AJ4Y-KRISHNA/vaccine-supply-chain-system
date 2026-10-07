@@ -5,5 +5,6 @@ const controller = require("../controllers/liveShipmentController");
 
 router.use(authenticate, scopeData);
 router.get("/", controller.listLiveShipments);
+router.get("/:shipmentId/temperature-history", controller.getShipmentTemperatureHistory);
 
 module.exports = router;

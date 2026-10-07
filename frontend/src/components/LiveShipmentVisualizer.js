@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Activity, AlertTriangle, ArrowRight, MapPin, RefreshCw } from "lucide-react";
+import { Activity, AlertTriangle, ArrowRight, RefreshCw } from "lucide-react";
 import { fetchTemperatureAlerts } from "../services/alerts";
-import { fetchLiveShipments } from "../services/liveShipments";
+import { fetchBatchLocationHistory, fetchLiveShipments, fetchShipmentTemperatureHistory } from "../services/liveShipments";
+import ShipmentLocationMap from "./ShipmentLocationMap";
+import TelemetryHistoryChart from "./TelemetryHistoryChart";
+import useDashboardRealtime from "../hooks/useDashboardRealtime";
 import "./LiveShipmentVisualizer.css";
 
 const REFRESH_MS = 8000;
@@ -57,22 +60,6 @@ function alertForShipment(shipment, alerts, sameBatchCount) {
   return candidates.sort((a, b) => Date.parse(b.timestamp || 0) - Date.parse(a.timestamp || 0))[0] || null;
 }
 
-function usePrefersReducedMotion() {
-  const [reduced, setReduced] = useState(() => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches || false);
-  useEffect(() => {
-    const query = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-    if (!query) return undefined;
-    const update = event => setReduced(event.matches);
-    query.addEventListener?.("change", update);
-    query.addListener?.(update);
-    return () => {
-      query.removeEventListener?.("change", update);
-      query.removeListener?.(update);
-    };
-  }, []);
-  return reduced;
-}
-
 function policyText(shipment) {
   if (!shipment.policy) return "Approved limits unavailable";
   const temperature = `${shipment.policy.minimumTemperature}–${shipment.policy.maximumTemperature}°C`;
@@ -81,72 +68,11 @@ function policyText(shipment) {
   return `Policy ${temperature}${humidity}`;
 }
 
-function Gauge({ label, value, minimum, maximum, unit, scaleMin, scaleMax }) {
-  if (value == null) return <span className="live-shipment__gauge">{label}: no reading</span>;
-  const low = minimum == null ? scaleMin : Number(minimum);
-  const high = maximum == null ? scaleMax : Number(maximum);
-  const start = Math.max(0, Math.min(100, (low - scaleMin) / (scaleMax - scaleMin) * 100));
-  const width = Math.max(0, Math.min(100 - start, (high - low) / (scaleMax - scaleMin) * 100));
-  const position = Math.max(0, Math.min(100, (Number(value) - scaleMin) / (scaleMax - scaleMin) * 100));
-  return <span className="live-shipment__gauge" aria-label={`${label} ${value}${unit}; configured range ${minimum ?? "not set"} to ${maximum ?? "not set"}${unit}`}>
-    <span className="live-shipment__gauge-label">{label}</span>
-    <strong>{Number(value).toFixed(1)}{unit}</strong>
-    <span className="live-shipment__gauge-track" aria-hidden="true">
-      <span className="live-shipment__gauge-band" style={{ left: `${start}%`, width: `${width}%` }} />
-      <span className="live-shipment__gauge-marker" style={{ left: `${position}%` }} />
-    </span>
-    <span className="live-shipment__gauge-range">{minimum == null || maximum == null ? "No approved range" : `${minimum}–${maximum}${unit}`}</span>
-  </span>;
-}
-
-function TruckScene({ shipment, progress, stopped }) {
-  const reading = shipment.latestTelemetry || {};
-  const policy = shipment.policy || {};
-  const x = 10 + progress * 4.7;
-  const location = reading.location || {};
-  const latitude = location.lat ?? location.latitude;
-  const longitude = location.lng ?? location.longitude;
-  return <div className="live-shipment__scene">
-    <svg className="live-shipment__svg" viewBox="0 0 720 180" role="img" aria-label={`Simulated shipment truck, ${progress}% through persisted shipment workflow${stopped ? ", stationary" : ""}`}>
-      <path className="live-shipment__ground" d="M0 136H720" />
-      <path className="live-shipment__road" d="M0 138H720" />
-      <path className="live-shipment__road-line" d="M0 138H720" />
-      <path className="live-shipment__route-track" d="M18 138H645" />
-      <circle className="live-shipment__destination" cx="650" cy="138" r="9" />
-      <text className="live-shipment__destination-label" x="635" y="166">DESTINATION</text>
-      <g className="live-shipment__truck" style={{ transform: `translateX(${x}px)` }}>
-        <rect className="live-shipment__cargo" x="0" y="53" width="142" height="67" rx="9" />
-        <rect className="live-shipment__cab" x="145" y="72" width="54" height="48" rx="7" />
-        <path className="live-shipment__window" d="M155 78h29v18h-29z" />
-        <circle className="live-shipment__wheel" cx="42" cy="124" r="13" />
-        <circle className="live-shipment__wheel" cx="166" cy="124" r="13" />
-        <circle className="live-shipment__wheel-inner" cx="42" cy="124" r="5" />
-        <circle className="live-shipment__wheel-inner" cx="166" cy="124" r="5" />
-        <circle className="live-shipment__status-light" cx="127" cy="63" r="7" />
-        <text className="live-shipment__truck-label" x="13" y="74">COLD-CHAIN LOAD</text>
-        <foreignObject x="12" y="81" width="119" height="34">
-          <div xmlns="http://www.w3.org/1999/xhtml" className="live-shipment__gauges">
-            <Gauge label="TEMP" value={reading.temperature} minimum={policy.minimumTemperature} maximum={policy.maximumTemperature} unit="°C" scaleMin={-40} scaleMax={60} />
-            <Gauge label="RH" value={reading.humidity} minimum={policy.minimumHumidity} maximum={policy.maximumHumidity} unit="%" scaleMin={0} scaleMax={100} />
-          </div>
-        </foreignObject>
-      </g>
-    </svg>
-    <div className="live-shipment__scene-foot">
-      <span>{stopped ? "Truck stationary" : `Workflow progress ${progress}%`}</span>
-      {latitude != null && longitude != null
-        ? <span><MapPin aria-hidden="true" size={13} /> Simulated GPS {Number(latitude).toFixed(4)}, {Number(longitude).toFixed(4)}</span>
-        : <span>Location not recorded</span>}
-    </div>
-  </div>;
-}
-
-function ShipmentCard({ shipment, alert, compact }) {
+function ShipmentCard({ shipment, alert, compact, locationHistory, sensorHistory }) {
   const quarantined = shipmentIsQuarantined(shipment, alert ? [alert] : []);
   const stopped = shipmentIsStopped(shipment, quarantined);
   const tone = shipmentTone(shipment, alert ? [alert] : []);
   const activeAlert = Boolean(alert && alert.phase !== "CLEARED" && alert.responseState !== "RESOLVED" && alert.status !== "RESOLVED");
-  const progress = shipmentProgress(shipment);
   const reading = shipment.latestTelemetry || {};
   const href = `/live-shipments?shipmentId=${encodeURIComponent(shipment.shipmentId)}`;
   const stateLabel = quarantined ? "Quarantined — pending review"
@@ -163,9 +89,18 @@ function ShipmentCard({ shipment, alert, compact }) {
       <span className={`live-shipment__state live-shipment__state--${tone}`}><span className="live-shipment__state-dot" />{stateLabel}</span>
     </div>
 
-    <Link className="live-shipment__scene-link" to={href} aria-label={`Open ${shipment.shipmentId} shipment alerts and details`}>
-      <TruckScene shipment={shipment} progress={progress} stopped={stopped} />
-    </Link>
+    <div className="live-shipment__map-wrap">
+      {locationHistory?.loading ? <p className="live-shipment__map-status" role="status">Loading saved GPS history…</p> : null}
+      {locationHistory?.error ? <p className="live-shipment__map-status live-shipment__map-status--error" role="status">Saved GPS history is temporarily unavailable.</p> : null}
+      <ShipmentLocationMap
+        shipmentId={shipment.shipmentId}
+        destination={shipment.destination}
+        points={locationHistory?.points || []}
+        currentLocation={reading.location ? { ...reading.location, recordedAt: reading.recordedAt } : null}
+        compact={compact}
+        statusColor={tone === "critical" ? "red" : tone === "warning" ? "amber" : tone === "normal" ? "green" : "unknown"}
+      />
+    </div>
 
     <div className="live-shipment__readings" aria-label={`Latest saved sensor reading for ${shipment.shipmentId}`}>
       <span><strong>{reading.temperature == null ? "—" : `${Number(reading.temperature).toFixed(1)}°C`}</strong> Temperature</span>
@@ -174,6 +109,7 @@ function ShipmentCard({ shipment, alert, compact }) {
       <span className="live-shipment__policy">{policyText(shipment)}</span>
     </div>
     <p className="live-shipment__timestamp">{reading.recordedAt ? `Last saved reading ${new Date(reading.recordedAt).toLocaleString()}` : "No shipment-linked reading saved yet"}</p>
+    <TelemetryHistoryChart records={sensorHistory || []} policy={shipment.policy || {}} shipmentId={shipment.shipmentId} />
 
     {alert ? <details className={`live-shipment__alert ${alert.requiresQualityReview && alert.phase !== "CLEARED" ? "live-shipment__alert--critical" : ""}`} open={!compact}>
       <summary><AlertTriangle aria-hidden="true" size={15} /> Latest related event: {alert.severity || "NOTICE"} · {alert.phase || alert.responseState || alert.status || "OPEN"}</summary>
@@ -194,16 +130,18 @@ export default function LiveShipmentVisualizer({
   maxVisible = 5,
   title = "Live shipment visualizer",
 }) {
+  const realtime = useDashboardRealtime();
   const [shipments, setShipments] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [alertError, setAlertError] = useState("");
+  const [locationHistories, setLocationHistories] = useState({});
+  const [sensorHistories, setSensorHistories] = useState({});
   const [visibleCount, setVisibleCount] = useState(maxVisible);
-  const prefersReducedMotion = usePrefersReducedMotion();
 
   const refresh = useCallback(async () => {
-    if (!localStorage.getItem("token")) {
+    if (!sessionStorage.getItem("token")) {
       setLoading(false);
       setLoadError("Sign in to view live shipment records.");
       return;
@@ -236,7 +174,7 @@ export default function LiveShipmentVisualizer({
     };
     setLoading(true);
     safeRefresh();
-    const timer = window.setInterval(() => { if (active) safeRefresh(); }, REFRESH_MS);
+    const timer = realtime.status === "live" ? null : window.setInterval(() => { if (active) safeRefresh(); }, REFRESH_MS);
     const onVisibility = () => { if (document.visibilityState === "visible") safeRefresh(); };
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
@@ -244,9 +182,59 @@ export default function LiveShipmentVisualizer({
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [refresh]);
+  }, [refresh, realtime.status]);
+
+  useEffect(() => {
+    if (!realtime.event) return;
+    refresh();
+  }, [realtime.event, refresh]);
 
   useEffect(() => setVisibleCount(maxVisible), [maxVisible, shipmentId]);
+
+  useEffect(() => {
+    let active = true;
+    const visibleShipments = shipments.slice(0, visibleCount);
+    const batchIds = [...new Set(visibleShipments.map(item => item.batchId).filter(Boolean))];
+    if (!batchIds.length) {
+      setLocationHistories({});
+      return () => { active = false; };
+    }
+    setLocationHistories(previous => Object.fromEntries(visibleShipments.map(item => [item.shipmentId, {
+      ...(previous[item.shipmentId] || {}), loading: true, error: false,
+    }])));
+    Promise.all(batchIds.map(async batchId => {
+      try {
+        const result = await fetchBatchLocationHistory(batchId, { limit: 500 });
+        return [batchId, Array.isArray(result.points) ? result.points : [], false];
+      } catch {
+        return [batchId, [], true];
+      }
+    })).then(results => {
+      if (!active) return;
+      const byBatchId = new Map(results.map(([batchId, points, error]) => [batchId, { points, error }]));
+      const sameBatchCounts = new Map();
+      shipments.forEach(item => sameBatchCounts.set(item.batchId, (sameBatchCounts.get(item.batchId) || 0) + 1));
+      setLocationHistories(Object.fromEntries(visibleShipments.map(item => {
+        const history = byBatchId.get(item.batchId) || { points: [], error: false };
+        const points = history.points.filter(point => point.shipmentId === item.shipmentId
+          || (!point.shipmentId && sameBatchCounts.get(item.batchId) === 1));
+        return [item.shipmentId, { points, error: history.error, loading: false }];
+      })));
+    });
+    return () => { active = false; };
+  }, [shipments, visibleCount]);
+
+  useEffect(() => {
+    let active = true;
+    const visible = shipments.slice(0, visibleCount);
+    Promise.all(visible.map(async shipment => {
+      try {
+        const result = await fetchShipmentTemperatureHistory(shipment.shipmentId, { limit: 500, latest: true });
+        return [shipment.shipmentId, result.records || []];
+      } catch { return [shipment.shipmentId, []]; }
+    })).then(entries => { if (active) setSensorHistories(previous => ({ ...previous, ...Object.fromEntries(entries) })); });
+    return () => { active = false; };
+  }, [shipments, visibleCount]);
 
   const cards = useMemo(() => shipments.map(shipment => {
     const sameBatchCount = shipments.filter(item => item.batchId === shipment.batchId).length;
@@ -254,12 +242,13 @@ export default function LiveShipmentVisualizer({
   }), [shipments, alerts]);
   const shown = cards.slice(0, visibleCount);
 
-  return <section className={`live-shipment ${compact ? "live-shipment--compact" : ""}`} data-reduced-motion={prefersReducedMotion ? "true" : "false"} aria-label="Simulated live shipment visualizer">
+  return <section id="live-shipment-visualizer" className={`live-shipment ${compact ? "live-shipment--compact" : ""}`} aria-label="Simulated live shipment visualizer">
     <header className="live-shipment__header">
       <div><div className="live-shipment__eyebrow"><Activity aria-hidden="true" size={14} /> SOFTWARE-ONLY TRACKING</div><h2>{title}</h2>
-        <p>Position reflects saved shipment workflow status—not a moving vehicle or live GPS feed.</p></div>
+        <p>Map route uses saved simulated GPS history from sensor readings. It is not live vehicle tracking.</p></div>
       <div className="live-shipment__header-actions">
         <span className="live-shipment__simulated"><span aria-hidden="true" className="live-shipment__simulated-dot" />Simulated</span>
+        <span className={`rounded-full px-2 py-1 text-[11px] font-bold ${realtime.status === "live" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`} role="status">{realtime.status === "live" ? "Live" : "Degraded · polling fallback"}</span>
         <button type="button" className="live-shipment__refresh" onClick={() => { setLoading(true); refresh(); }} aria-label="Refresh live shipments"><RefreshCw aria-hidden="true" size={15} /> Refresh</button>
         {compact ? <Link className="live-shipment__details-link" to="/live-shipments">View all <ArrowRight aria-hidden="true" size={15} /></Link> : null}
       </div>
@@ -270,8 +259,8 @@ export default function LiveShipmentVisualizer({
     {loading && !shipments.length ? <p role="status" className="live-shipment__empty">Loading role-visible shipment and telemetry records…</p> : null}
     {!loading && !loadError && !cards.length ? <p className="live-shipment__empty">No shipment records are available for this account.</p> : null}
 
-    <div className="live-shipment__list">{shown.map(({ shipment, alert }) => <ShipmentCard key={shipment.shipmentId} shipment={shipment} alert={alert} compact={compact} />)}</div>
+    <div className="live-shipment__list">{shown.map(({ shipment, alert }) => <ShipmentCard key={shipment.shipmentId} shipment={shipment} alert={alert} compact={compact} locationHistory={locationHistories[shipment.shipmentId]} sensorHistory={sensorHistories[shipment.shipmentId]} />)}</div>
     {cards.length > visibleCount ? <button type="button" className="live-shipment__show-more" onClick={() => setVisibleCount(value => Math.min(cards.length, value + maxVisible))}>Show {Math.min(maxVisible, cards.length - visibleCount)} more of {cards.length} shipments</button> : null}
-    <p className="live-shipment__disclaimer">For demonstration only. Policy limits are displayed only when an approved batch policy is linked; this visualization is not a vaccine-safety determination.</p>
+    <p className="live-shipment__disclaimer">For demonstration only. Coordinates come from saved simulated sensor readings and OpenStreetMap tiles; policy limits are informational and are not a vaccine-safety determination.</p>
   </section>;
 }

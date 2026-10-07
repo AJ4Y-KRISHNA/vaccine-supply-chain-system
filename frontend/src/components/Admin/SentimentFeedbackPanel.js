@@ -23,6 +23,7 @@ function formatDate(value) {
 export default function SentimentFeedbackPanel({ onFocusBatch, selectedAuditBatchId }) {
   const { addToast } = useToast();
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [payload, setPayload] = useState({
     summary: {
       totalFeedbackCount: 0,
@@ -42,9 +43,11 @@ export default function SentimentFeedbackPanel({ onFocusBatch, selectedAuditBatc
   const loadFeedback = async (silent = false) => {
     try {
       setLoading(true);
+      setError("");
       const response = await fetchAdminFeedback();
-      setPayload(response);
+      setPayload(prev => ({ ...prev, ...response, summary: { ...prev.summary, ...response?.summary } }));
     } catch (_error) {
+      setError("Feedback analytics unavailable. Refresh to retry; previously loaded results may be stale.");
       if (!silent) addToast("error", "Feedback analytics failed to load");
     } finally {
       setLoading(false);
@@ -85,12 +88,15 @@ export default function SentimentFeedbackPanel({ onFocusBatch, selectedAuditBatc
         <button
           type="button"
           onClick={() => loadFeedback()}
+          disabled={loading}
           className="inline-flex items-center gap-2 rounded-lg border border-[#dbe6f2] px-3 py-1.5 text-xs font-semibold text-[#4b6b90] hover:bg-[#f4f8fd]"
         >
           <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
           Refresh
         </button>
       </div>
+
+      {error && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
 
       <div className="mb-4 grid grid-cols-2 gap-3 xl:grid-cols-5">
         {summaryCards.map((card) => (

@@ -66,36 +66,36 @@ class DurableSimulatorManager {
   async tickOnce(deviceId, persistReading, actorId) {
     return this.run(deviceId, async () => {
       const config = this.memory.getSimulator(deviceId).config;
-      const tick = async () => {
-        let reading;
-        try {
+      let reading;
+      try {
+        const result = await this.memory.tickOnce(deviceId, async nextReading => {
+          reading = nextReading;
+          // Durable pending reading and post-tick RNG/clock are saved before HTTP ingestion.
+          // Do not hold the batch mutex across HTTP: the ingestion request evaluates the
+          // same batch on a separate async context and must acquire that mutex itself.
+          await this.save(deviceId);
+          if (nextReading.simulation?.sensorFault) {
+            const expectedSince = new Date(+new Date(nextReading.timestamp) - config.tickIntervalMs);
+            return checkMissingTelemetry(nextReading.batchId, nextReading.timestamp, {
+              deviceId: nextReading.deviceId, shipmentId: nextReading.shipmentId, expectedSince,
+            });
+          }
+          return persistReading(nextReading);
+        }, async nextReading => {
           const operator = await this.authorizeRuntime(deviceId, actorId);
           const operatorUserId = String(operator._id);
-          const result = await this.memory.tickOnce(deviceId, async nextReading => {
-            reading = nextReading;
-            // Durable pending reading and post-tick RNG/clock are saved before ingestion.
-            await this.save(deviceId);
-            if (nextReading.simulation?.sensorFault) {
-              const expectedSince = new Date(+new Date(nextReading.timestamp) - config.tickIntervalMs);
-              return checkMissingTelemetry(nextReading.batchId, nextReading.timestamp, {
-                deviceId: nextReading.deviceId, shipmentId: nextReading.shipmentId, expectedSince,
-              });
-            }
-            return persistReading(nextReading);
-          }, nextReading => applyOverrideToReading(nextReading, { operatorUserId }));
-          await this.save(deviceId);
-          return { ...result, simulation: this.getStatus(deviceId) };
-        } catch (error) {
-          this.memory.stop(deviceId);
-          if (reading) this.memory.pending.set(deviceId, reading);
-          this.memory.errors.set(deviceId, error.message);
-          try { await this.save(deviceId); } catch (_) { /* Preserve in-memory retry; last successful durable checkpoint remains valid. */ }
-          throw error;
-        }
-      };
-      // Serialize selection, checkpoint, telemetry write and policy evaluation
-      // with override mutations. Nested policy calls re-enter this same batch lock.
-      return config.batchId ? withBatchLock(config.batchId, tick) : tick();
+          const apply = () => applyOverrideToReading(nextReading, { operatorUserId });
+          return config.batchId ? withBatchLock(config.batchId, apply) : apply();
+        });
+        await this.save(deviceId);
+        return { ...result, simulation: this.getStatus(deviceId) };
+      } catch (error) {
+        this.memory.stop(deviceId);
+        if (reading) this.memory.pending.set(deviceId, reading);
+        this.memory.errors.set(deviceId, error.message);
+        try { await this.save(deviceId); } catch (_) { /* Preserve in-memory retry; last successful durable checkpoint remains valid. */ }
+        throw error;
+      }
     });
   }
   async start(deviceId, persistReading, actorId) {

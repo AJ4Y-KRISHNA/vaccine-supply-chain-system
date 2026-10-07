@@ -8,6 +8,7 @@ const TemperatureAlertSchema = new mongoose.Schema(
       unique: true,
       default: () => `TEMP-${new mongoose.Types.ObjectId().toString().toUpperCase()}`,
     },
+    correlationId: { type: String, maxlength: 128, index: true },
     batchId: { type: String, index: true },
     shipmentId: { type: String, index: true },
     deviceId: { type: String, index: true },
@@ -22,7 +23,7 @@ const TemperatureAlertSchema = new mongoose.Schema(
     currentHumidity: Number,
     minimumAllowedHumidity: Number,
     maximumAllowedHumidity: Number,
-    metric: { type: String, enum: ["TEMPERATURE", "HUMIDITY", "RELIABILITY"] },
+    metric: { type: String, enum: ["TEMPERATURE", "HUMIDITY", "RELIABILITY", "STATISTICAL_ANOMALY"] },
     breachedLimit: Number,
     currentReading: {
       temperature: Number,
@@ -32,7 +33,7 @@ const TemperatureAlertSchema = new mongoose.Schema(
     violationType: {
       type: String,
       // Keep HUMIDITY for records created by the earlier generic humidity rule.
-      enum: ["HIGH_TEMPERATURE", "LOW_TEMPERATURE", "LOW_HUMIDITY", "HIGH_HUMIDITY", "HUMIDITY", "TELEMETRY_RELIABILITY"],
+      enum: ["HIGH_TEMPERATURE", "LOW_TEMPERATURE", "LOW_HUMIDITY", "HIGH_HUMIDITY", "HUMIDITY", "TELEMETRY_RELIABILITY", "STATISTICAL_TREND_ANOMALY"],
       required: true,
     },
     severity: {

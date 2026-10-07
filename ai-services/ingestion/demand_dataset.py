@@ -25,12 +25,15 @@ def load_dataset(source_path=None, n_months=12):
         for row in rows:
             year, month = map(int, row["month"].split("-"))
             if not 1 <= month <= 12 or not 1900 <= year <= 2200: raise ValueError("Invalid month")
-            periods.append(year * 12 + month)
+            periods.append(year * 12 + month - 1)
             values.append(float(row["doses"]))
         if any(b - a != 1 for a, b in zip(periods, periods[1:])):
             raise ValueError("CSV months must be chronological, unique and contiguous")
         values = validate(values[-n_months:])
+        selected_periods = periods[-len(values):]
+        last = selected_periods[-1]
         return values, {"source": path.name, "sha256": hashlib.sha256(content).hexdigest(),
-                        "synthetic": False, "verification": "operator-supplied, not independently verified", "period": "month"}
-    values = [12000, 14000, 15000, 16000, 18000, 17500, 19000, 21000, 22500, 24000, 24500, 26000][-n_months:]
-    return values, {"source": "built-in deterministic demo fixture v1", "synthetic": True, "period": "month", "verification": "NOT observed vaccine demand"}
+                        "synthetic": False, "verification": "operator-supplied, not independently verified", "period": "month",
+                        "first_period": f"{selected_periods[0] // 12:04d}-{selected_periods[0] % 12 + 1:02d}",
+                        "last_period": f"{last // 12:04d}-{last % 12 + 1:02d}"}
+    raise ValueError("No historical demand series supplied or configured; forecast from persisted order history instead. No synthetic fallback is used.")

@@ -6,7 +6,10 @@ const Shipment = require("../models/Shipment");
 const Distribution = require("../models/Distribution");
 const Vaccination = require("../models/Vaccination");
 const InventoryCertificate = require("../models/InventoryCertificate");
-const { registerBatchOnChain, getBatchFromChain, getBatchLifecycleFromChain, extractHash } = require("../services/blockchainService");
+const TelemetryAnchor = require("../models/TelemetryAnchor");
+const { registerBatchOnChain, getBatchFromChain, getBatchLifecycleFromChain, extractHash,
+  getLatestTemperatureReadingFromChain, getBatchTemperatureHistoryFromChain,
+  verifyTemperatureReadingOnChain, verifyTemperatureTransactionOnChain } = require("../services/blockchainService");
 
 async function collectBatchTransactions(batchId) {
   const [batch, rawMaterials, productions, reports, shipments, distributions, vaccinations, certificates] = await Promise.all([
@@ -216,39 +219,69 @@ const createBatch = async (req, res) => {
 
 // VERIFY BATCH
 const verifyBatch = async (req, res) => {
-
   try {
-
     const { batchId } = req.params;
-
     const batch = await getBatchFromChain(batchId);
-
-    if (!batch || !batch.batchId) {
-
-      return res.status(404).json({
-        message: "Batch not found on blockchain"
-      });
-
+    if (!batch || !batch.batchId) return res.status(404).json({ message: "Batch not found on blockchain" });
+    const chainEvidence = await getLatestTemperatureReadingFromChain(batchId);
+    const { recordId, digest, transactionHash, chainId, contractAddress } = req.query;
+    const hasProof = Boolean(recordId || digest || transactionHash || chainId || contractAddress);
+    if (hasProof) {
+      if (!/^0x[0-9a-f]{64}$/i.test(String(recordId || "")) || !/^0x[0-9a-f]{64}$/i.test(String(digest || "")) ||
+          !/^0x[0-9a-f]{64}$/i.test(String(transactionHash || ""))) {
+        return res.status(400).json({ error: "QR proof must include a valid record ID, digest and transaction hash" });
+      }
+      if (String(chainId) !== "31337" || String(contractAddress || "").toLowerCase() !== chainEvidence.contractAddress.toLowerCase()) {
+        return res.status(409).json({ error: "QR proof identifies a different local chain or contract" });
+      }
+      if (!await verifyTemperatureTransactionOnChain(transactionHash, batchId, recordId, digest)) {
+        return res.status(409).json({ error: "The QR transaction does not contain the matching local-chain temperature event" });
+      }
+      const reading = await verifyTemperatureReadingOnChain(batchId, recordId, digest);
+      if (!reading) return res.status(409).json({ error: "The QR sensor record or digest does not match the local blockchain" });
+      return res.json({ batchId: batch.batchId, vaccineType: batch.vaccineType, quantity: String(batch.quantity), status: batch.status,
+        verified: true, chainId: chainEvidence.chainId, contractAddress: chainEvidence.contractAddress,
+        telemetryCount: chainEvidence.total, telemetryVerified: true, verifiedReading: reading });
     }
-
-    res.json({
-      batchId: batch.batchId,
-      vaccineType: batch.vaccineType,
-      quantity: String(batch.quantity),
-      status: batch.status,
-      verified: true
-    });
-
+    return res.json({ batchId: batch.batchId, vaccineType: batch.vaccineType, quantity: String(batch.quantity), status: batch.status,
+      verified: true, chainId: chainEvidence.chainId, contractAddress: chainEvidence.contractAddress,
+      telemetryCount: chainEvidence.total, latestReading: chainEvidence.latestReading, telemetryVerified: false });
   } catch (error) {
-
     console.error(error);
-
-    res.status(500).json({
-      error: "Blockchain verification failed"
-    });
-
+    return res.status(500).json({ error: "Blockchain verification failed" });
   }
+};
 
+const getBatchVerificationPayload = async (req, res) => {
+  try {
+    const batch = await getBatchFromChain(req.params.batchId);
+    if (!batch?.batchId) return res.status(404).json({ message: "Batch not found on blockchain" });
+    const telemetry = await getLatestTemperatureReadingFromChain(req.params.batchId);
+    let latestReading = telemetry.latestReading;
+    if (latestReading?.recordId && latestReading.digest) {
+      const anchor = await TelemetryAnchor.findOne({ batchId: batch.batchId, eventId: latestReading.recordId,
+        rawDigest: latestReading.digest, rawChainStatus: "confirmed" })
+        .select("rawTxHash rawChainId rawContractAddress").lean();
+      if (anchor?.rawTxHash && anchor.rawChainId === telemetry.chainId &&
+          anchor.rawContractAddress?.toLowerCase() === telemetry.contractAddress?.toLowerCase()) {
+        latestReading = { ...latestReading, transactionHash: anchor.rawTxHash };
+      }
+    }
+    return res.json({ batchId: batch.batchId, chainId: telemetry.chainId, contractAddress: telemetry.contractAddress,
+      telemetryCount: telemetry.total, latestReading });
+  } catch (_) { return res.status(503).json({ error: "Local-chain verification payload is unavailable" }); }
+};
+
+const getBatchOnChainTelemetry = async (req, res) => {
+  const offset = req.query.offset == null ? 0 : Number(req.query.offset);
+  const limit = req.query.limit == null ? 100 : Number(req.query.limit);
+  if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
+    return res.status(400).json({ error: "Offset must be nonnegative and limit must be between 1 and 500" });
+  }
+  try {
+    const history = await getBatchTemperatureHistoryFromChain(req.params.batchId, { offset, limit });
+    return res.json(history);
+  } catch (_) { return res.status(503).json({ error: "On-chain sensor history is unavailable" }); }
 };
 
 const getBatchLifecycle = async (req, res) => {
@@ -270,5 +303,9 @@ const getBatchLifecycle = async (req, res) => {
 module.exports = {
   createBatch,
   verifyBatch,
-  getBatchLifecycle
-};          
+  getBatchVerificationPayload,
+  getBatchOnChainTelemetry,
+  getBatchLifecycle,
+  collectBatchTransactions,
+  annotateLifecycleWithTransactions,
+};

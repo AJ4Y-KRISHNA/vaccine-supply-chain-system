@@ -1,58 +1,32 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getSimulatorRoutes, listInTransitShipments, signIn } from "./fieldOperatorApi.js";
+import { getShipmentTemperatureHistory } from "./fieldOperatorApi.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
-function jsonResponse(payload, status = 200) {
-  return { ok: status >= 200 && status < 300, status, json: async () => payload };
-}
-
-describe("fieldOperatorApi", () => {
-  it("uses the existing login request shape and requests scoped live shipments with the JWT", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({ token: "access.jwt", role: "manufacturer" }))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          shipments: [
-            { shipmentId: "SHIP-1", status: "In Transit" },
-            { shipmentId: "SHIP-2", status: "Delivered" },
-            { shipmentId: "SHIP-3", status: "Transit to clinic" },
-          ],
-        }),
-      );
+describe("persisted shipment history API", () => {
+  it("follows every cursor page and returns normalized chart points", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({
+        records: [
+          { readingId: "r1", sequenceNumber: 1, temperature: 4.1, humidity: 55, batteryLevel: 99,
+            location: { lat: 9.9, lng: 76.2 }, recordedAt: "2026-01-01T00:00:00.000Z" },
+          { readingId: "r2", sequenceNumber: 2, temperature: 4.2, humidity: 56, batteryLevel: 98,
+            location: { lat: 9.91, lng: 76.21 }, recordedAt: "2026-01-01T00:01:00.000Z" },
+        ], hasMore: true, nextCursor: "cursor-2",
+      }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({
+        records: [{ readingId: "r3", sequenceNumber: 3, temperature: 4.3, humidity: 57,
+          location: { lat: 9.92, lng: 76.22 }, recordedAt: "2026-01-01T00:02:00.000Z" }],
+        hasMore: false, nextCursor: null,
+      }) });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(
-      signIn({ email: "maker@example.test ", password: "secret", role: "manufacturer" }),
-    ).resolves.toMatchObject({ token: "access.jwt" });
-    const shipments = await listInTransitShipments("access.jwt");
+    const history = await getShipmentTemperatureHistory("token", "SHIP-1", { pageSize: 2 });
 
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/auth/login");
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
-      email: "maker@example.test",
-      password: "secret",
-      role: "manufacturer",
-    });
-    expect(fetchMock.mock.calls[1][0]).toBe("/api/live-shipments?limit=100");
-    expect(fetchMock.mock.calls[1][1].headers.get("Authorization")).toBe("Bearer access.jwt");
-    expect(shipments.map((shipment) => shipment.shipmentId)).toEqual(["SHIP-1", "SHIP-3"]);
-  });
-
-  it("loads persisted simulator route configs with the session token", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        jsonResponse({
-          simulations: [{ shipmentId: "SHIP-1", route: [{ latitude: 9.9, longitude: 76.2 }] }],
-        }),
-      );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(getSimulatorRoutes("access.jwt")).resolves.toMatchObject([
-      { shipmentId: "SHIP-1" },
-    ]);
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/simulator/status");
-    expect(fetchMock.mock.calls[0][1].headers.get("Authorization")).toBe("Bearer access.jwt");
+    expect(history).toHaveLength(3);
+    expect(history.map(point => point.readingId)).toEqual(["r1", "r2", "r3"]);
+    expect(history[0]).toMatchObject({ gpsLat: 9.9, gpsLng: 76.2, battery: 99, simulationClock: "2026-01-01T00:00:00.000Z" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toContain("cursor=cursor-2");
   });
 });

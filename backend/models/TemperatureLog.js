@@ -9,15 +9,23 @@ const TemperatureLogSchema = new mongoose.Schema({
   deviceId: String,
   vehicleId: String,
   sequenceNumber: { type: Number, min: 0 },
+  correlationId: { type: String, maxlength: 128, index: true },
+  eventId: { type: String, index: true },
   idempotencyKey: { type: String, select: false },
   // Optional simulator provenance; legacy ingestion records remain valid.
-  source: { type: String, enum: ["auto-simulated", "manual-override"] },
+  source: { type: String, enum: ["simulator", "manual", "csv", "auto-simulated", "manual-override"], default: "simulator", index: true },
+  enteredBy: String,
+  note: { type: String, maxlength: 1000 },
+  needsReview: { type: Boolean, default: false },
+  supersedes: { type: mongoose.Schema.Types.ObjectId, ref: "TemperatureLog" },
   overrideId: String,
   operatorUserId: String,
   temperature: Number,
   humidity: Number,
   batteryLevel: Number,
   evaluation: mongoose.Schema.Types.Mixed,
+  // Locally calculated synthetic edge metrics are preserved for dashboard/API inspection.
+  edge: mongoose.Schema.Types.Mixed,
   recordedAt: { type: Date, default: Date.now },
   status: { type: String, enum: ["Normal", "Alert"], default: "Normal" },
   location: {
@@ -32,6 +40,8 @@ const TemperatureLogSchema = new mongoose.Schema({
     scenario: String,
     seed: String,
     tick: Number,
+    sourceSequenceNumber: Number,
+    linkLoss: Boolean,
   },
 });
 

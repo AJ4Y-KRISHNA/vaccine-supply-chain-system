@@ -41,6 +41,36 @@ test("brief excursions request a reading, deduplicate notifications, and recover
   expect(normal.batchQuarantined).toBe(false);
   expect(await Alert.findOne({ batchId: f.batchId }).lean()).toMatchObject({ phase: "RECOVERED", status: "RESOLVED" });
 });
+test("advisory anomaly evidence is attached to a policy alert without changing rule authority", async () => {
+  const f = await fixture();
+  const anomalyInference = { status: "ANOMALY", model: "rolling_median_mad_v1", advisory_only: true,
+    reason: "Temperature differs substantially from this sensor's prior baseline." };
+  const result = await evaluateReading({ ...f.reading(10), anomalyInference });
+  expect(result).toMatchObject({ evaluated: true, violationType: "HIGH_TEMPERATURE", severity: "WARNING", batchQuarantined: false });
+  const alert = await Alert.findOne({ batchId: f.batchId }).lean();
+  expect(alert.context.anomalyInference).toEqual({ status: "ANOMALY", model: "rolling_median_mad_v1", advisoryOnly: true,
+    reason: anomalyInference.reason, trend: null });
+});
+test("a statistical pre-limit trend creates a review alert and notification without automatically holding stock", async () => {
+  const f = await fixture();
+  const trend = { status: "PROJECTED_LIMIT_CROSSING", slope_c_per_minute: 0.12, projected_temperature_c: 8.52,
+    boundary_c: 8, minutes_to_cross: 10.7, horizon_minutes: 15,
+    reason: "Temperature is rising at +0.12°C/min; the current 6.72°C reading is within the configured 2–8°C range, but the timestamped trend projects crossing 8°C in about 10.7 minutes." };
+  const result = await evaluateReading({ ...f.reading(6.72), anomalyInference: {
+    is_anomaly: true, status: "ANOMALY", model: "rolling_median_mad_v1", reason: trend.reason, trend,
+  } });
+  const alert = await Alert.findOne({ batchId: f.batchId, metric: "STATISTICAL_ANOMALY" }).lean();
+
+  expect(result).toMatchObject({ severity: "WARNING", batchQuarantined: false, recommendedAction: "REQUEST_READING" });
+  expect(result.reasons.join(" ")).toContain("crossing 8°C");
+  expect(alert).toMatchObject({ metric: "STATISTICAL_ANOMALY", violationType: "STATISTICAL_TREND_ANOMALY",
+    severity: "WARNING", phase: "REVIEW_REQUIRED", requiresQualityReview: false, breachedLimit: 8 });
+  expect(alert.reason).toContain("crossing 8°C");
+  expect(alert.recommendedAction).toContain("does not place a cold-chain hold");
+  expect(alert.context.anomalyInference.trend).toMatchObject({ status: "PROJECTED_LIMIT_CROSSING", boundary_c: 8 });
+  expect((await Batch.findOne({ batchId: f.batchId })).coldChainHoldAlertIds || []).toHaveLength(0);
+  expect(await Notification.countDocuments({ alertId: alert.alertId })).toBeGreaterThan(0);
+});
 test.each([10.8, 0])("sustained %s°C excursions hold the batch and all its shipments; recovery does not release", async temperature => {
   const f = await fixture();
   await Shipment.create({ shipmentId: `${f.shipmentId}-2`, batchId: f.batchId, distributor: "dist-b", destination: "hospital-b" });

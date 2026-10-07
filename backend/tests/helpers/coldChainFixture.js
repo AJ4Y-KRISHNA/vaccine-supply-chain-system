@@ -31,7 +31,8 @@ async function fixture({ approved = true, policy: overrides = {} } = {}) {
     policy = await Policy.create({ ...examplePolicy, ...overrides, batchId, vaccineType: batch.vaccineType, approvedBy: reviewer._id });
     batch.coldChainPolicyId = policy._id; await batch.save();
   }
-  const at = minute => new Date(Date.UTC(2026, 0, 1) + minute * 60000).toISOString();
+  const fixtureClock = Date.now() - 10 * 60 * 1000;
+  const at = minute => new Date(fixtureClock + minute * 60000).toISOString();
   const reading = (temperature, minute = 0, extra = {}) => ({ batchId, shipmentId, deviceId: `SENSOR-${sequence}`, vehicleId: "TRUCK-1", temperature, humidity: 60, batteryLevel: 90, latitude: 9, longitude: 76, timestamp: at(minute), ...extra });
   return { batch, batchId, shipmentId, reviewer, policy, reading, at };
 }

@@ -1,5 +1,5 @@
 import React from "react";
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Link } from "react-router-dom";
 
 import Login from "./pages/Login";
 import AdminDashboard from "./pages/AdminDashboard";
@@ -10,6 +10,7 @@ import ArchitectureStatus from "./pages/ArchitectureStatus";
 import LiveShipmentPage from "./pages/LiveShipmentPage";
 import ManualSimulatorConsole from "./pages/ManualSimulatorConsole";
 import ProtectedRoute from "./components/ProtectedRoute";
+import BatchVerifyPage from "./pages/BatchVerifyPage";
 import { ToastProvider } from "./components/Toast";
 import { manualSimulatorConsoleEnabled } from "./config/features";
 
@@ -20,6 +21,7 @@ function App() {
       <Router>
         <Routes>
           <Route path="/" element={<Login />} />
+          <Route path="/verify/:batchId" element={<ProtectedRoute allowed={["Admin", "Manufacturer", "Distributor", "Healthcare Professional"]}><BatchVerifyPage /></ProtectedRoute>} />
           <Route
             path="/live-shipments"
             element={
@@ -78,6 +80,7 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route path="*" element={<main className="mx-auto max-w-xl p-8"><h1 className="text-2xl font-semibold">Page not found</h1><p className="my-4">This page is not part of the vaccine supply-chain application.</p><Link to="/" className="text-blue-700 underline">Return to sign in</Link></main>} />
         </Routes>
       </Router>
     </ToastProvider>

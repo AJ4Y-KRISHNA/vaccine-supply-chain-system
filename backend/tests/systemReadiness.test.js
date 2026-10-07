@@ -1,4 +1,7 @@
-const { databaseHealth, blockchainHealth, aiServiceHealth } = require("../services/systemReadiness");
+const net = require("node:net");
+const { EventEmitter } = require("node:events");
+const { databaseHealth, blockchainHealth, aiServiceHealth, coldChainAnchoringHealth, mqttHealth, redisHealth, emailHealth, pingRedis, workerHealth,
+  EMAIL_HEALTH_TIMEOUT_MS, EMAIL_HEALTH_CACHE_MS, resetEmailHealthCache } = require("../services/systemReadiness");
 
 function databaseConnection({ insertOne, findOne, deleteOne } = {}) {
   const collection = {
@@ -41,6 +44,16 @@ test("MongoDB health requires and cleans up a successful write/read round trip",
   expect(stored).toBeNull();
 });
 
+test("external worker readiness requires a fresh Redis heartbeat", async () => {
+  const freshClient = { on: jest.fn(), connect: jest.fn().mockResolvedValue(), get: jest.fn().mockResolvedValue("100000"),
+    quit: jest.fn().mockResolvedValue() };
+  const fresh = await workerHealth({ mode: "external", host: "127.0.0.1", createRedisClient: () => freshClient, now: 105000 });
+  expect(fresh).toMatchObject({ service: "Redis Stream worker", status: "healthy", reachable: true, healthy: true, heartbeatAgeMs: 5000 });
+  const staleClient = { ...freshClient, get: jest.fn().mockResolvedValue(null), quit: jest.fn().mockResolvedValue() };
+  const stale = await workerHealth({ mode: "external", host: "127.0.0.1", createRedisClient: () => staleClient, now: 105000 });
+  expect(stale).toMatchObject({ status: "stale-or-missing", reachable: true, healthy: false, failure: "heartbeat-missing" });
+});
+
 test("MongoDB health reports disconnected and failed probe paths", async () => {
   const disconnected = await databaseHealth({ connection: { readyState: 0, db: null } });
   expect(disconnected).toMatchObject({ status: "unavailable", reachable: false, healthy: false, failure: "not-connected" });
@@ -75,6 +88,17 @@ test("blockchain RPC can be reachable while block production fails", async () =>
   expect(result).toMatchObject({ status: "unhealthy", reachable: true, healthy: false, blockProgressed: false, failure: "rpc-check-failed" });
 });
 
+test.each([
+  ["no configured contract", { contractAddress: "" }, { status: "contract-not-ready", healthy: false, failure: "contract-address-required" }],
+  ["missing artifact", { artifactExists: () => false }, { status: "contract-not-ready", healthy: false, contract: { healthy: false, status: "abi-artifact-missing" } }],
+  ["missing deployed bytecode", { providerFactory: () => blockchainProvider({ getCode: jest.fn().mockResolvedValue("0x") }) },
+    { status: "contract-not-ready", healthy: false, contract: { healthy: false, bytecodePresent: false, status: "no-contract-at-configured-address" } }],
+])("blockchain readiness is not green with %s", async (_label, overrides, expected) => {
+  const result = await blockchainHealth({ artifactExists: () => true,
+    contractAddress: "0x1111111111111111111111111111111111111111", ...overrides });
+  expect(result).toMatchObject(expected);
+});
+
 test("AI health makes a bounded synthetic advisory decision request", async () => {
   const post = jest.fn().mockResolvedValue({ status: 200, data: {
     advisory_only: true,
@@ -84,7 +108,7 @@ test("AI health makes a bounded synthetic advisory decision request", async () =
 
   expect(result).toMatchObject({ service: "FastAPI AI service", status: "healthy", reachable: true, healthy: true });
   expect(result.latencyMs).toEqual(expect.any(Number));
-  expect(post).toHaveBeenCalledWith(expect.stringMatching(/127\.0\.0\.1:8000\/decision\/decide$/), expect.objectContaining({
+  expect(post).toHaveBeenCalledWith(`${process.env.AI_BASE_URL || "http://127.0.0.1:8000"}/decision/decide`, expect.objectContaining({
     social_text: expect.stringMatching(/Synthetic/),
     vaccination_history: [1, 2, 3, 4, 5, 6],
     target_center: "READINESS-CHECK",
@@ -102,4 +126,99 @@ test("AI health distinguishes an HTTP error, timeout, and a blocked remote endpo
   const blocked = await aiServiceHealth({ baseUrl: "https://example.invalid", post });
   expect(blocked).toMatchObject({ status: "blocked-non-local-endpoint", reachable: false, healthy: false });
   expect(post).not.toHaveBeenCalled();
+});
+
+test("AI health permits only explicitly configured Docker service names for internal HTTP", async () => {
+  const previous = process.env.DOCKER_INTERNAL_HOSTS;
+  process.env.DOCKER_INTERNAL_HOSTS = "ai-service,mosquitto,redis,hardhat";
+  try {
+    const post = jest.fn().mockResolvedValue({ status: 200, data: { advisory_only: true,
+      decision: { forecast_demand: 8, recommended_units: 2, risk_flag: false } } });
+    const result = await aiServiceHealth({ baseUrl: "http://ai-service:8000", post });
+    expect(result).toMatchObject({ status: "healthy", reachable: true, healthy: true });
+    expect(post).toHaveBeenCalledWith(expect.stringMatching(/ai-service:8000\/decision\/decide$/), expect.any(Object), expect.any(Object));
+  } finally { if (previous === undefined) delete process.env.DOCKER_INTERNAL_HOSTS; else process.env.DOCKER_INTERNAL_HOSTS = previous; }
+});
+
+test("MQTT readiness authenticates and accepts only loopback or explicitly allowlisted local services", async () => {
+  const previous = process.env.DOCKER_INTERNAL_HOSTS;
+  process.env.DOCKER_INTERNAL_HOSTS = "mosquitto";
+  try {
+    const client = new EventEmitter(); client.end = jest.fn();
+    const connect = jest.fn(() => { queueMicrotask(() => client.emit("connect")); return client; });
+    const result = await mqttHealth({ url: "mqtt://mosquitto:1883", username: "synthetic", password: "test-secret", connect });
+    expect(result).toMatchObject({ service: "Mosquitto MQTT", status: "healthy", reachable: true, healthy: true, transport: "mqtt" });
+    expect(connect).toHaveBeenCalledWith("mqtt://mosquitto:1883", expect.objectContaining({ username: "synthetic", password: "test-secret" }));
+    expect(client.end).toHaveBeenCalledWith(true);
+    const blocked = await mqttHealth({ url: "mqtt://unlisted-host:1883", connect });
+    expect(blocked).toMatchObject({ status: "blocked-non-local-endpoint", healthy: false });
+  } finally { if (previous === undefined) delete process.env.DOCKER_INTERNAL_HOSTS; else process.env.DOCKER_INTERNAL_HOSTS = previous; }
+});
+
+test("Redis readiness checks authenticated PING/PONG without returning the password", async () => {
+  const previous = process.env.DOCKER_INTERNAL_HOSTS;
+  process.env.DOCKER_INTERNAL_HOSTS = "redis";
+  try {
+    const probe = jest.fn().mockResolvedValue(true);
+    const result = await redisHealth({ host: "redis", port: 6379, password: "not-returned-secret", probe });
+    expect(result).toMatchObject({ service: "Redis", status: "healthy", reachable: true, healthy: true });
+    expect(JSON.stringify(result)).not.toContain("not-returned-secret");
+    expect(probe).toHaveBeenCalledWith(expect.objectContaining({ host: "redis", port: 6379, password: "not-returned-secret" }));
+  } finally { if (previous === undefined) delete process.env.DOCKER_INTERNAL_HOSTS; else process.env.DOCKER_INTERNAL_HOSTS = previous; }
+});
+
+test("Redis PING probe speaks RESP and validates AUTH plus PONG responses", async () => {
+  let received = "";
+  const server = net.createServer(socket => socket.on("data", data => {
+    received += data.toString("utf8");
+    if (received.includes("PING")) socket.write("+OK\r\n+PONG\r\n");
+  }));
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    await expect(pingRedis({ host: "127.0.0.1", port: server.address().port, password: "test-pass" })).resolves.toBe(true);
+    expect(received).toContain("AUTH"); expect(received).toContain("test-pass"); expect(received).toContain("PING");
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test("email health reflects the Ethereal capture transport result without provider credentials", async () => {
+  const result = await emailHealth({ check: jest.fn().mockResolvedValue({ status: "healthy", healthy: true,
+    reachable: true, mode: "ethereal", simulated: true, previewAvailable: true }) });
+  expect(result).toMatchObject({ status: "healthy", reachable: true, healthy: true, mode: "ethereal", simulated: true, previewAvailable: true });
+});
+
+test("Ethereal readiness uses a 10-second probe, caches for 60 seconds, and degrades when recent capture succeeds", async () => {
+  expect(EMAIL_HEALTH_TIMEOUT_MS).toBe(10_000);
+  expect(EMAIL_HEALTH_CACHE_MS).toBe(60_000);
+  const check = jest.fn().mockResolvedValue({ status: "healthy", healthy: true, reachable: true,
+    mode: "ethereal", simulated: true, previewAvailable: true });
+  resetEmailHealthCache();
+  let now = 10_000;
+  const first = await emailHealth({ check, cache: true, now: () => now });
+  const cached = await emailHealth({ check, cache: true, now: () => now + 59_999 });
+  expect(first.status).toBe("healthy");
+  expect(cached).toMatchObject({ status: "healthy", cached: true, cacheAgeMs: 59_999 });
+  expect(check).toHaveBeenCalledTimes(1);
+
+  const degraded = await emailHealth({ check: () => new Promise(() => {}), timeoutMs: 2,
+    hasRecentCapture: () => true, cache: false });
+  expect(degraded).toMatchObject({ status: "degraded", reachable: true, healthy: false,
+    mode: "ethereal", simulated: true, previewAvailable: true,
+    failure: "smtp-probe-timeout-capture-confirmed" });
+});
+
+test("cold-chain anchoring readiness reports its flag, safe counts and local write prerequisites", async () => {
+  const docs = { Audit: 4, AuditAnchor: { confirmed: 2, failed: 1 }, TemperatureLog: 5, TelemetryAnchor: { confirmed: 3, failed: 0 } };
+  const model = value => ({ countDocuments: jest.fn(async filter => typeof value === "number" ? value : value[filter.status] || 0) });
+  const result = await coldChainAnchoringHealth({ enabled: true, databaseHealthy: true, blockchain: { healthy: true, contract: { healthy: true } },
+    writerConfigured: true, writerAuthorized: true, models: { Audit: model(docs.Audit), AuditAnchor: model(docs.AuditAnchor), TemperatureLog: model(docs.TemperatureLog), TelemetryAnchor: model(docs.TelemetryAnchor) } });
+  expect(result).toMatchObject({ enabled: true, ready: true, status: "ready", writerConfigured: true, writerAuthorized: true,
+    evidence: { coldChainAuditDigests: true, temperatureReadingDigests: true, rawTelemetryOnChain: true },
+    counts: { coldChainAudit: { total: 4, confirmed: 2, failed: 1, pending: 1 }, temperatureHistory: { total: 5, confirmed: 3, failed: 0, pending: 2,
+      rawOnChainConfirmed: 0, rawOnChainFailed: 0, rawOnChainPending: 5 } } });
+  const disabled = await coldChainAnchoringHealth({ enabled: false, databaseHealthy: false, writerConfigured: false });
+  expect(disabled).toMatchObject({ enabled: false, ready: false, status: "disabled", counts: null });
+  const unauthorized = await coldChainAnchoringHealth({ enabled: true, databaseHealthy: true, blockchain: { healthy: true, contract: { healthy: true } },
+    writerConfigured: true, writerAuthorized: false, models: { Audit: model(0), AuditAnchor: model({ confirmed: 0, failed: 0 }),
+      TemperatureLog: model(0), TelemetryAnchor: model({ confirmed: 0, failed: 0 }) } });
+  expect(unauthorized).toMatchObject({ ready: false, status: "writer-not-authorized", writerConfigured: true, writerAuthorized: false });
 });

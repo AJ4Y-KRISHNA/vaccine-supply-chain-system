@@ -51,3 +51,23 @@ test("non-reviewers can inspect policy and check silence, but cannot approve", a
   fireEvent.click(screen.getByText("Check missing telemetry"));
   await waitFor(() => expect(checkColdChainTelemetry).toHaveBeenCalledWith("BATCH-1", "2026-01-01T00:05:00.000Z"));
 });
+
+test("changing batches clears policy draft and clock so another batch cannot inherit an approval", () => {
+  render(<ColdChainPolicyForm canReview onChange={jest.fn()} />);
+  fireEvent.change(screen.getByLabelText("Policy batch ID"), { target: { value: "B1" } });
+  fireEvent.change(screen.getByLabelText("Minimum temperature (°C)"), { target: { value: "2" } });
+  fireEvent.change(screen.getByLabelText("Current simulation clock (ISO timestamp)"), { target: { value: "2026-01-01T00:05:00.000Z" } });
+  fireEvent.change(screen.getByLabelText("Policy batch ID"), { target: { value: "B2" } });
+  expect(screen.getByLabelText("Minimum temperature (°C)")).toHaveValue(null);
+  expect(screen.getByLabelText("Current simulation clock (ISO timestamp)")).toHaveValue("");
+  expect(approveColdChainPolicy).not.toHaveBeenCalled();
+});
+
+test("invalid clock does not call the missing-telemetry mutation", async () => {
+  render(<ColdChainPolicyForm canReview={false} />);
+  fireEvent.change(screen.getByLabelText("Policy batch ID"), { target: { value: "B1" } });
+  fireEvent.change(screen.getByLabelText("Current simulation clock (ISO timestamp)"), { target: { value: "invalid" } });
+  fireEvent.click(screen.getByText("Check missing telemetry"));
+  expect(await screen.findByRole("status")).toHaveTextContent("valid ISO simulation timestamp");
+  expect(checkColdChainTelemetry).not.toHaveBeenCalled();
+});

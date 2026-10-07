@@ -93,7 +93,7 @@ test("only devices for the selected shipment receive a manual reading; automatic
     latitude: expected.latitude, longitude: expected.longitude });
   expect(persist).toHaveBeenNthCalledWith(1, expect.objectContaining({ source: "manual-override", overrideId }));
   expect(persist).toHaveBeenNthCalledWith(2, expect.objectContaining({ source: "auto-simulated" }));
-  expect(simulationReadingToTemperatureLog(manual.reading)).toMatchObject({ source: "manual-override", overrideId, operatorUserId: String(f.reviewer._id) });
+  expect(simulationReadingToTemperatureLog(manual.reading)).toMatchObject({ source: "manual", overrideId, operatorUserId: String(f.reviewer._id) });
 });
 
 test("ramp is deterministic and expiry returns the device to its original automatic sequence", async () => {
@@ -142,7 +142,7 @@ test("manual sensor values go through existing policy evaluation and can quarant
   for (let index = 0; index < 3; index += 1) await simulatorManager.tickOnce(`IOT-${f.batchId}`, persistSimulationReading, f.reviewer._id);
   const logs = await TemperatureLog.find({ batchId: f.batchId }).sort({ sequenceNumber: 1 }).lean();
   expect(logs).toHaveLength(3);
-  expect(logs.every(log => log.source === "manual-override" && log.overrideId === created.body.override.overrideId && log.operatorUserId === String(f.reviewer._id))).toBe(true);
+  expect(logs.every(log => log.source === "manual" && log.overrideId === created.body.override.overrideId && log.operatorUserId === String(f.reviewer._id))).toBe(true);
   const alert = await TemperatureAlert.findOne({ batchId: f.batchId, requiresQualityReview: true }).lean();
   expect(alert).toMatchObject({ phase: "QUARANTINED", context: expect.objectContaining({ source: "manual-override", overrideId: created.body.override.overrideId }) });
 });
@@ -161,20 +161,26 @@ test("sensor-fault preset suppresses measured samples and invokes the existing m
   expect(alert?.reason).toMatch(/sensor reading missing/i);
 });
 
-test("a scheduled tick and override request serialize on the existing batch lock", async () => {
+test("an override created during ingestion applies to the next sample, not the pending sample", async () => {
   let finishPersistence;
   const pendingTick = simulatorManager.tickOnce(`IOT-${f.batchId}`, () => new Promise(resolve => { finishPersistence = resolve; }), f.reviewer._id);
   while (!finishPersistence) await new Promise(resolve => setTimeout(resolve, 2));
   let requestSettled = false;
   const pendingRequest = request(app).post("/api/simulator/overrides").set(adminAuth).send(makeOverride(f.shipmentId))
     .then(response => { requestSettled = true; return response; });
-  await new Promise(resolve => setTimeout(resolve, 30));
-  expect(requestSettled).toBe(false);
+  // Wait for the observable response, not a 30 ms machine-speed assumption.
+  // Persistence remains unresolved throughout: a lock held over ingestion
+  // would still prevent this request from settling and fail the bounded check.
+  const responseDeadline = Date.now() + 2000;
+  while (!requestSettled && Date.now() < responseDeadline) await new Promise(resolve => setTimeout(resolve, 10));
+  // The sample is already selected and tagged before network ingestion. Do not
+  // hold the batch lock over HTTP, since the receiver evaluates this same batch.
+  expect(requestSettled).toBe(true);
+  const response = await pendingRequest;
+  expect(response.status).toBe(201);
   finishPersistence({ _id: "first-tick" });
   const tick = await pendingTick;
-  const response = await pendingRequest;
   expect(tick.reading.source).toBe("auto-simulated");
-  expect(response.status).toBe(201);
   const next = await simulatorManager.tickOnce(`IOT-${f.batchId}`, jest.fn().mockResolvedValue({ _id: "second-tick" }), f.reviewer._id);
   expect(next.reading.source).toBe("manual-override");
 });

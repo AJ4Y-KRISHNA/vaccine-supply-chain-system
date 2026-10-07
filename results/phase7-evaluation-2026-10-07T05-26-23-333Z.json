@@ -1,0 +1,392 @@
+{
+  "generatedAt": "2026-10-07T05:23:43.027Z",
+  "synthetic": true,
+  "clinicalUse": false,
+  "limitations": [
+    "Single local Compose run; not a production benchmark",
+    "Scenario labels represent simulator intent, not independently measured ground truth",
+    "Failure isolation is a consumer-handler probe; dependency containers are not stopped",
+    "Synthetic simulator timestamps are accelerated/backfilled and are not field latency"
+  ],
+  "scenarios": {
+    "normal": {
+      "profile": "NORMAL",
+      "syntheticGroundTruth": "no temperature excursion expected",
+      "readings": 4,
+      "detected": false,
+      "correct": true,
+      "accuracy": 1,
+      "tp": 0,
+      "fp": 0,
+      "tn": 1,
+      "fn": 0,
+      "precision": null,
+      "recall": null,
+      "f1": null
+    },
+    "door_open": {
+      "profile": "DOOR_OPEN",
+      "syntheticGroundTruth": "temperature excursion expected",
+      "readings": 4,
+      "detected": true,
+      "correct": true,
+      "accuracy": 1,
+      "tp": 1,
+      "fp": 0,
+      "tn": 0,
+      "fn": 0,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1
+    },
+    "compressor_drift": {
+      "profile": "COMPRESSOR_DRIFT",
+      "syntheticGroundTruth": "temperature excursion expected",
+      "readings": 40,
+      "detected": false,
+      "correct": false,
+      "accuracy": 0,
+      "tp": 0,
+      "fp": 0,
+      "tn": 0,
+      "fn": 1,
+      "precision": null,
+      "recall": 0,
+      "f1": null
+    },
+    "sensor_flatline": {
+      "profile": "SENSOR_FLATLINE",
+      "syntheticGroundTruth": "no temperature excursion expected",
+      "readings": 4,
+      "detected": false,
+      "correct": true,
+      "accuracy": 1,
+      "tp": 0,
+      "fp": 0,
+      "tn": 1,
+      "fn": 0,
+      "precision": null,
+      "recall": null,
+      "f1": null
+    },
+    "gps_jump": {
+      "profile": "GPS_JUMP",
+      "syntheticGroundTruth": "no temperature excursion expected",
+      "readings": 9,
+      "detected": false,
+      "correct": true,
+      "accuracy": 1,
+      "tp": 0,
+      "fp": 0,
+      "tn": 1,
+      "fn": 0,
+      "precision": null,
+      "recall": null,
+      "f1": null
+    },
+    "link_loss": {
+      "profile": "LINK_LOSS",
+      "syntheticGroundTruth": "no temperature excursion expected",
+      "readings": 4,
+      "detected": false,
+      "correct": true,
+      "accuracy": 1,
+      "tp": 0,
+      "fp": 0,
+      "tn": 1,
+      "fn": 0,
+      "precision": null,
+      "recall": null,
+      "f1": null
+    },
+    "aggregate": {
+      "tp": 1,
+      "fp": 0,
+      "tn": 4,
+      "fn": 1,
+      "precision": 1,
+      "recall": 0.5,
+      "f1": 0.6666666666666666
+    }
+  },
+  "latency": {
+    "sensorTimestampToAlertMs": {
+      "samples": 1,
+      "p50": 529147,
+      "p95": 529147,
+      "unit": "ms"
+    },
+    "wallFromTickToAlertObservedMs": {
+      "samples": 1,
+      "p50": 4206,
+      "p95": 4206,
+      "unit": "ms"
+    },
+    "alertToNotificationMs": {
+      "samples": 1,
+      "p50": 572,
+      "p95": 572,
+      "unit": "ms"
+    },
+    "wallAlertToNotificationObservedMs": {
+      "samples": 1,
+      "p50": 6,
+      "p95": 6,
+      "unit": "ms"
+    },
+    "alertToChainConfirmationMs": {
+      "samples": 1,
+      "p50": 7563,
+      "p95": 7563,
+      "unit": "ms"
+    },
+    "wallAlertToChainObservedMs": {
+      "samples": 1,
+      "p50": 5783,
+      "p95": 5783,
+      "unit": "ms"
+    }
+  },
+  "throughput": {
+    "1": {
+      "devices": 1,
+      "acceptedMessages": 3,
+      "elapsedSeconds": 0.03,
+      "messagesPerSecond": 100,
+      "protocol": "HTTP",
+      "synthetic": true
+    },
+    "10": {
+      "devices": 10,
+      "acceptedMessages": 30,
+      "elapsedSeconds": 0.335,
+      "messagesPerSecond": 89.55223880597015,
+      "protocol": "HTTP",
+      "synthetic": true
+    },
+    "50": {
+      "devices": 50,
+      "acceptedMessages": 150,
+      "elapsedSeconds": 3.011,
+      "messagesPerSecond": 49.81733643307871,
+      "protocol": "HTTP",
+      "synthetic": true
+    }
+  },
+  "offlineRecovery": {
+    "scenario": "LINK_LOSS",
+    "expectedMessages": 4,
+    "forwardedMessages": 4,
+    "lostMessages": 0,
+    "duplicates": 0,
+    "targetLost": 0,
+    "targetDuplicates": 0,
+    "ordered": true
+  },
+  "failureIsolation": {
+    "probeType": "direct independent-consumer handler invocation; shared services were not stopped",
+    "aiUnavailable": true,
+    "alertPersistedWhileAiUnavailable": true,
+    "ingestionPersistedWhileAiUnavailable": true,
+    "chainUnavailable": true,
+    "ingestionPersistedWhileChainUnavailable": true,
+    "alertPersistedWhileChainUnavailable": true,
+    "ingestionAlertSuccessRateAiDown": 1,
+    "ingestionAlertSuccessRateChainDown": 1
+  },
+  "blockchain": {
+    "confirmedAnchors": 23,
+    "measuredWindows": [
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-normal-1791350623027-0f5cacec",
+        "readings": 3,
+        "gasUsed": 186138,
+        "gasPerReading": 62046
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-normal-1791350623027-0f5cacec",
+        "readings": 1,
+        "gasUsed": 186138,
+        "gasPerReading": 186138
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-door_open-1791350623027-0f5cacec",
+        "readings": 1,
+        "gasUsed": 186174,
+        "gasPerReading": 186174
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-door_open-1791350623027-0f5cacec",
+        "readings": 3,
+        "gasUsed": 186174,
+        "gasPerReading": 62058
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-compressor_drift-1791350623027-0f5cacec",
+        "readings": 1,
+        "gasUsed": 186246,
+        "gasPerReading": 186246
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-compressor_drift-1791350623027-0f5cacec",
+        "readings": 5,
+        "gasUsed": 186258,
+        "gasPerReading": 37251.6
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-compressor_drift-1791350623027-0f5cacec",
+        "readings": 6,
+        "gasUsed": 186246,
+        "gasPerReading": 31041
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-compressor_drift-1791350623027-0f5cacec",
+        "readings": 3,
+        "gasUsed": 186258,
+        "gasPerReading": 62086
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-compressor_drift-1791350623027-0f5cacec",
+        "readings": 3,
+        "gasUsed": 186258,
+        "gasPerReading": 62086
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-compressor_drift-1791350623027-0f5cacec",
+        "readings": 1,
+        "gasUsed": 186258,
+        "gasPerReading": 186258
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-compressor_drift-1791350623027-0f5cacec",
+        "readings": 4,
+        "gasUsed": 186258,
+        "gasPerReading": 46564.5
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-compressor_drift-1791350623027-0f5cacec",
+        "readings": 1,
+        "gasUsed": 186246,
+        "gasPerReading": 186246
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-compressor_drift-1791350623027-0f5cacec",
+        "readings": 2,
+        "gasUsed": 186246,
+        "gasPerReading": 93123
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-compressor_drift-1791350623027-0f5cacec",
+        "readings": 4,
+        "gasUsed": 186258,
+        "gasPerReading": 46564.5
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-compressor_drift-1791350623027-0f5cacec",
+        "readings": 2,
+        "gasUsed": 186258,
+        "gasPerReading": 93129
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-compressor_drift-1791350623027-0f5cacec",
+        "readings": 4,
+        "gasUsed": 186258,
+        "gasPerReading": 46564.5
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-compressor_drift-1791350623027-0f5cacec",
+        "readings": 3,
+        "gasUsed": 186246,
+        "gasPerReading": 62082
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-compressor_drift-1791350623027-0f5cacec",
+        "readings": 1,
+        "gasUsed": 186258,
+        "gasPerReading": 186258
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-sensor_flatline-1791350623027-0f5cacec",
+        "readings": 2,
+        "gasUsed": 186234,
+        "gasPerReading": 93117
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-sensor_flatline-1791350623027-0f5cacec",
+        "readings": 2,
+        "gasUsed": 186234,
+        "gasPerReading": 93117
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-gps_jump-1791350623027-0f5cacec",
+        "readings": 6,
+        "gasUsed": 186150,
+        "gasPerReading": 31025
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-gps_jump-1791350623027-0f5cacec",
+        "readings": 3,
+        "gasUsed": 186162,
+        "gasPerReading": 62054
+      },
+      {
+        "batchId": "SYNTHETIC-PHASE7-EVAL-link_loss-1791350623027-0f5cacec",
+        "readings": 4,
+        "gasUsed": 186150,
+        "gasPerReading": 46537.5
+      }
+    ],
+    "averageGasPerAnchor": 186222,
+    "averageGasPerReading": 65893.93846153846,
+    "chainId": 31337
+  },
+  "forecast": {
+    "available": true,
+    "synthetic": true,
+    "vaccineType": "Synthetic Vaccine A",
+    "region": "Synthetic Demo Region",
+    "runId": "6ac5d7fe430e4214d3b9171c",
+    "provenance": {
+      "source": "MongoDB synthetic Order history",
+      "synthetic": true,
+      "observation_count": 35,
+      "observed_months": 35,
+      "vaccine_type": "Synthetic Vaccine A",
+      "region": "Synthetic Demo Region",
+      "first_period": "2023-11",
+      "last_period": "2026-09",
+      "missing_months": 0,
+      "note": "Complete UTC months only; absent months treated as zero recorded demand; current partial month excluded."
+    },
+    "comparison": [
+      {
+        "model": "seasonal_naive_12",
+        "status": "evaluated",
+        "rmse": 0,
+        "mape": 0,
+        "mape_excluded_zero_months": 0,
+        "test_months": 6
+      },
+      {
+        "model": "SARIMA(1,0,0)(0,1,1,12)",
+        "status": "evaluated",
+        "rmse": 1.7404671430534633e-14,
+        "mape": 7.642540696941988e-15,
+        "mape_excluded_zero_months": 0,
+        "test_months": 6
+      }
+    ],
+    "mape": {
+      "seasonal_naive_12": {
+        "status": "evaluated",
+        "mape": 0,
+        "mape_excluded_zero_months": 0
+      },
+      "SARIMA(1,0,0)(0,1,1,12)": {
+        "status": "evaluated",
+        "mape": 7.642540696941988e-15,
+        "mape_excluded_zero_months": 0
+      }
+    }
+  }
+}

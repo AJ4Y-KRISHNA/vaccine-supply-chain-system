@@ -5,6 +5,8 @@ const Policy = require("../models/ColdChainPolicy");
 const State = require("../models/TelemetryState");
 const { withBatchLock } = require("./coldChainLock");
 const { audit, notify, quarantine, normaliseKey } = require("./coldChainActions");
+const fieldOperatorEvents = require("./fieldOperatorEventBus");
+const logger = require("./structuredLogger");
 const buildExcursionKey = (r) => JSON.stringify([r.batchId || "", r.shipmentId || "", r.deviceId || r.sensorId || ""]);
 const round = (v) => Number(v.toFixed(3));
 const numeric = (v) => typeof v === "number" && Number.isFinite(v);
@@ -38,6 +40,7 @@ async function updateEvent({ reading, state, policy, category, type, reasons, du
   if (!reasons.length) {
     if (!alert) return null;
     alert.excursionClosedAt = timestamp;
+    alert.correlationId = reading.correlationId || alert.correlationId;
     alert.activeExcursionKey = undefined;
     alert.latestReadingAt = timestamp;
     alert.timestamp = timestamp;
@@ -50,19 +53,24 @@ async function updateEvent({ reading, state, policy, category, type, reasons, du
     if (!alert.requiresQualityReview) { alert.status = "RESOLVED"; alert.resolvedAt = timestamp; alert.resolvedBy = "SYSTEM"; }
     await alert.save();
     await audit(alert, "EXCURSION_CLOSED", "SYSTEM", alert.reason, timestamp);
+    if (require("./eventBackbone").enabled()) await notify(alert, "RECOVERED");
+    await require("./dashboardEventBus").publishAlert(alert, "CLOSED");
     return alert;
   }
   const created = !alert;
   if (!alert) alert = new Alert({
     batchId: reading.batchId, shipmentId: reading.shipmentId || "", deviceId: reading.deviceId || "",
+    correlationId: reading.correlationId,
     vehicleId: reading.vehicleId || "", manufacturer: reading.manufacturer,
     manufacturerKey: normaliseKey(reading.manufacturer), activeExcursionKey: key,
     excursionStartedAt: timestamp, engineVersion: "cold-chain-rules-v1", policyId: policy._id,
     policySnapshot: policy, vaccineType: policy.vaccineType,
   });
   const reliability = category === "RELIABILITY";
+  const statisticalAnomaly = category === "ANOMALY";
   const phase = sustained ? "QUARANTINED" : reliability ? "RELIABILITY_ISSUE" : "REVIEW_REQUIRED";
   alert.currentTemperature = reading.temperature;
+  alert.correlationId = reading.correlationId || alert.correlationId;
   alert.currentHumidity = reading.humidity;
   alert.currentReading = currentReading;
   alert.vaccineType = policy.vaccineType;
@@ -76,6 +84,9 @@ async function updateEvent({ reading, state, policy, category, type, reasons, du
     alert.minimumAllowedHumidity = policy.minimumHumidity;
     alert.maximumAllowedHumidity = policy.maximumHumidity;
     alert.breachedLimit = type === "LOW_HUMIDITY" ? policy.minimumHumidity : policy.maximumHumidity;
+  } else if (statisticalAnomaly) {
+    alert.metric = "STATISTICAL_ANOMALY";
+    alert.breachedLimit = reading.anomalyInference?.trend?.boundary_c;
   } else {
     alert.metric = "RELIABILITY";
   }
@@ -98,7 +109,7 @@ async function updateEvent({ reading, state, policy, category, type, reasons, du
     alert.maximumExcursionHumidity = Math.max(alert.maximumExcursionHumidity ?? reading.humidity, reading.humidity);
   }
   alert.phase = alert.requiresQualityReview ? "QUARANTINED" : phase;
-  alert.recommendedAction = alert.requiresQualityReview ? "Hold remains in place. Request quality review and clearance." : reliability ? "Check device/simulation and request another reading."
+  alert.recommendedAction = alert.requiresQualityReview ? "Hold remains in place. Request quality review and clearance." : statisticalAnomaly ? "Review the projected temperature trend and verify cooling equipment; this statistical warning does not place a cold-chain hold." : reliability ? "Check device/simulation and request another reading."
     : sustained ? "Quarantine shipment and request quality review." : "Review required; request another reading.";
   alert.confidence = {
     level: reliability || healthLimited || !numeric(reading.batteryLevel) ? "LIMITED" : "HIGH",
@@ -108,11 +119,21 @@ async function updateEvent({ reading, state, policy, category, type, reasons, du
     vaccineType: policy.vaccineType, shipmentStatus: shipment?.status || "Unknown",
     shipmentId: shipment?.shipmentId || reading.shipmentId || "",
     distributor: shipment?.distributor || "", hospital: shipment?.destination || "",
-    source: reading.source, overrideId: reading.overrideId, operatorUserId: reading.operatorUserId };
+    source: reading.source, enteredBy: reading.enteredBy, note: reading.note, needsReview: reading.needsReview === true,
+    supersedes: reading.supersedes || null, overrideId: reading.overrideId, operatorUserId: reading.operatorUserId,
+    anomalyInference: reading.anomalyInference ? {
+      status: reading.anomalyInference.status,
+      model: reading.anomalyInference.model,
+      advisoryOnly: true,
+      reason: reading.anomalyInference.reason,
+      trend: reading.anomalyInference.trend || null,
+    } : null };
   await alert.save();
   if (created) await audit(alert, "EVENT_OPENED", "SYSTEM", alert.reason, timestamp, { policyId: policy._id, context: alert.context });
+  else if (require("./eventBackbone").enabled()) await audit(alert, "EVENT_UPDATED", "SYSTEM", alert.reason, timestamp);
   if (sustained) await quarantine(alert, "SYSTEM", alert.reason, timestamp);
   else await notify(alert, alert.phase);
+  await require("./dashboardEventBus").publishAlert(alert, created ? "OPENED" : "UPDATED");
   return alert;
 }
 
@@ -128,7 +149,7 @@ async function evaluateReading(reading, temperatureLogId) {
     const timestamp = new Date(reading.timestamp);
     if (!Number.isFinite(timestamp.getTime())) throw new Error("Invalid reading timestamp");
     reading = { ...reading, manufacturer: batch.manufacturer, temperatureLogId,
-      source: reading.simulation?.telemetrySource || reading.simulation?.source || "temperature-ingestion",
+      source: reading.simulation?.telemetrySource || reading.simulation?.source || reading.source || "temperature-ingestion",
       overrideId: reading.simulation?.overrideId || reading.overrideId,
       operatorUserId: reading.simulation?.operatorUserId || reading.operatorUserId };
     const streamKey = buildExcursionKey(reading);
@@ -187,18 +208,25 @@ async function evaluateReading(reading, temperatureLogId) {
     const humidityAlert = await updateEvent({ ...shared, category: "HUMIDITY", type: humidityType === "NORMAL" ? "HUMIDITY" : humidityType,
       reasons: humidityReasons, duration: humidityDuration, sustained: humiditySustained });
     const healthAlert = await updateEvent({ ...shared, category: "RELIABILITY", type: "TELEMETRY_RELIABILITY", reasons: health });
+    const statisticalAnomaly = !abnormal && reading.anomalyInference?.is_anomaly === true;
+    const anomalyReasons = statisticalAnomaly && reading.anomalyInference?.reason
+      ? [`Statistical trend review: ${reading.anomalyInference.reason}`] : [];
+    const anomalyAlert = await updateEvent({ ...shared, category: "ANOMALY", type: "STATISTICAL_TREND_ANOMALY",
+      reasons: anomalyReasons, closeReason: "The current statistical temperature trend no longer projects a policy-boundary crossing." });
     Object.assign(state, { lastReadingAt: timestamp, checkedAt: timestamp, policyId: policy._id,
       temperature: reading.temperature, humidity: reading.humidity, batteryLevel: reading.batteryLevel,
-      latitude: reading.latitude, longitude: reading.longitude, source: reading.source });
+      latitude: reading.latitude, longitude: reading.longitude, source: reading.source, correlationId: reading.correlationId });
     await state.save();
+    logger.info("policy.reading.evaluated", { correlationId: reading.correlationId, batchId: batch.batchId,
+      shipmentId: reading.shipmentId || "", policyStatus: "APPROVED", violationType: evaluation.violationType });
     const anySustained = sustained || humiditySustained;
     const held = anySustained || !!(await Alert.exists({ batchId: batch.batchId, requiresQualityReview: true }));
-    return { evaluated: true, policyStatus: "APPROVED", ...evaluation, severity: anySustained ? "CRITICAL" : (abnormal || humidityAbnormal || health.length) ? "WARNING" : "NORMAL", batchQuarantined: held,
+    return { evaluated: true, policyStatus: "APPROVED", ...evaluation, severity: anySustained ? "CRITICAL" : (abnormal || humidityAbnormal || health.length || statisticalAnomaly) ? "WARNING" : "NORMAL", batchQuarantined: held,
       affected: { batchId: batch.batchId, shipmentId: reading.shipmentId || "", deviceId: reading.deviceId || "" },
-      notificationTargets: [...new Set([temperatureAlert, humidityAlert, healthAlert].filter(Boolean).flatMap(a => a.notificationTargets || []))],
-      alertIds: [temperatureAlert, humidityAlert, healthAlert].filter(Boolean).map(a => a.alertId),
-      confidence: health.length ? "LIMITED" : "HIGH", reasons: [...reasons, ...humidityReasons, ...health],
-      recommendedAction: held ? "QUARANTINE_PENDING_REVIEW" : abnormal || humidityAbnormal ? "REQUEST_READING" : health.length ? "CHECK_DEVICE" : "RECORD_NORMAL" };
+      notificationTargets: [...new Set([temperatureAlert, humidityAlert, healthAlert, anomalyAlert].filter(Boolean).flatMap(a => a.notificationTargets || []))],
+      alertIds: [temperatureAlert, humidityAlert, healthAlert, anomalyAlert].filter(Boolean).map(a => a.alertId),
+      confidence: health.length ? "LIMITED" : "HIGH", reasons: [...reasons, ...humidityReasons, ...health, ...anomalyReasons],
+      recommendedAction: held ? "QUARANTINE_PENDING_REVIEW" : abnormal || humidityAbnormal || statisticalAnomaly ? "REQUEST_READING" : health.length ? "CHECK_DEVICE" : "RECORD_NORMAL" };
   });
 }
 
@@ -221,13 +249,19 @@ async function checkMissingTelemetry(batchId, asOf, expectedDevice = null) {
     for (const state of states) {
       const baseline = state.lastReadingAt || state.expectedSince;
       if (!baseline || timestamp <= state.checkedAt || timestamp - baseline <= policy.maximumReadingGapMs) continue;
-      const reading = { ...state.toObject(), timestamp, manufacturer: batch.manufacturer };
+      const { normalizeOrCreateCorrelationId } = require("./correlationContext");
+      const correlationId = normalizeOrCreateCorrelationId(state.correlationId);
+      const reading = { ...state.toObject(), timestamp, manufacturer: batch.manufacturer, correlationId };
       const alert = await updateEvent({ reading, state, policy, category: "RELIABILITY", type: "TELEMETRY_RELIABILITY",
         reasons: [`${state.lastReadingAt ? "Sensor reading missing" : "First expected sensor reading missing"} for ${timestamp - baseline}ms; approved gap is ${policy.maximumReadingGapMs}ms. Check device/simulation.`] });
       state.checkedAt = timestamp;
       state.temperatureSince = undefined;
       await state.save();
       alerts.push(alert);
+      if (alert) {
+        fieldOperatorEvents.publishAlert(alert.toObject());
+        await require("./dashboardEventBus").publishAlert(alert, "UPDATED");
+      }
     }
     return alerts;
   });

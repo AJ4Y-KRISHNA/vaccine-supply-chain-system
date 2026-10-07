@@ -15,8 +15,11 @@ async function checkOnce(now = new Date()) {
       // The generator remains seed/tick-driven; no clock or reading is rewritten.
       const elapsed = Math.max(0, +now - +new Date(watch.anchorWallAt));
       const asOf = new Date(+new Date(watch.anchorSimulationAt) + elapsed);
-      await checkMissingTelemetry(config.batchId, asOf, { deviceId: device.deviceId,
+      const work = () => checkMissingTelemetry(config.batchId, asOf, { deviceId: device.deviceId,
         shipmentId: config.shipmentId || "", expectedSince: watch.expectedSince });
+      if (require("./eventBackbone").enabled()) {
+        await require("./coldChainLock").withBatchLock(config.batchId, () => require("mongoose").connection.transaction(work));
+      } else await work();
     }
     health.lastCheckedAt = now.toISOString(); health.lastError = null;
   } catch (_) { health.lastError = "Telemetry monitor check failed; inspect MongoDB and policy/device configuration."; }

@@ -32,7 +32,10 @@ test("device state survives restart, restores stopped, and continues determinist
     const result = await restored.tickOnce(config.deviceId, persist);
     const reference = new VirtualDeviceSimulator(config); reference.tick();
     const expected = reference.tick();
-    expect(result.reading).toMatchObject({ ...expected, source: "auto-simulated", overrideId: null,
+    const { correlationId: _referenceCorrelationId, ...deterministicReading } = expected;
+    const { correlationId: actualCorrelationId, ...actualReading } = result.reading;
+    expect(actualCorrelationId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(actualReading).toMatchObject({ ...deterministicReading, source: "auto-simulated", overrideId: null,
       simulation: { ...expected.simulation, telemetrySource: "auto-simulated", overrideId: null } });
   } finally { restored.clear(); }
 });

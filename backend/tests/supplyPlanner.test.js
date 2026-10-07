@@ -3,13 +3,36 @@ const base = () => ({ asOf: "2030-01-01", transportCapacityDoses: 80,
   inventory: ["A", "B"].map((batchId, i) => ({ batchId, vaccineType: "TEST", remainingDoses: 60, reasons: [], expiresAt: `2030-01-0${i + 2}` })),
   orders: ["O1", "O2"].map(orderId => ({ orderId, hospital: orderId, vaccineType: "TEST", requestedDoses: 60, status: "Pending", priority: "Normal" })),
   destinations: ["O1", "O2"].map(orderId => ({ orderId, freeCapacityDoses: 50, transitHours: 1 })) });
-test("deterministic FEFO honors demand, shared stock, transport and destination capacity", () => {
+test("deterministic constrained optimizer honors demand, shared stock, transport and destination capacity", () => {
   const args = base(), plan = planSupply(args);
   expect(plan).toEqual(planSupply(args));
   expect(plan.totalAllocated).toBe(80);
+  expect(plan.optimizationStatus).toBe("OPTIMAL_MAX_FLOW");
+  expect(plan).not.toHaveProperty("advisoryOnly");
   expect(plan.allocations.map(a => [a.batchId, a.quantity])).toEqual([["A", 50], ["A", 10], ["B", 20]]);
   expect(plan.unfilled.map(u => u.doses)).toEqual([10, 30]);
   expect(args.inventory[0].remainingDoses).toBe(60); // Pure advisory; no stock mutation.
+});
+test("global optimization favors the shorter feasible route when priority is equal", () => {
+  const args = base();
+  args.transportCapacityDoses = 10;
+  args.inventory = [{ batchId: "A", vaccineType: "TEST", remainingDoses: 20, reasons: [], expiresAt: "2030-01-02" }];
+  args.destinations = [{ orderId: "O1", freeCapacityDoses: 20, transitHours: 10 }, { orderId: "O2", freeCapacityDoses: 20, transitHours: 1 }];
+  const plan = planSupply(args);
+  expect(plan.totalAllocated).toBe(10);
+  expect(plan.allocations.map(item => item.orderId)).toEqual(["O2"]);
+  expect(plan.algorithm).toBe("constrained-min-cost-max-flow-v1");
+  expect(plan.explanation).toContain("minimum-cost maximum-flow");
+});
+test("higher order priority remains ahead of shorter route when vehicle capacity is scarce", () => {
+  const args = base();
+  args.transportCapacityDoses = 10;
+  args.inventory = [{ batchId: "A", vaccineType: "TEST", remainingDoses: 20, reasons: [], expiresAt: "2030-01-02" }];
+  args.orders[0].priority = "Critical";
+  args.orders[1].priority = "Low";
+  args.destinations = [{ orderId: "O1", freeCapacityDoses: 20, transitHours: 10 }, { orderId: "O2", freeCapacityDoses: 20, transitHours: 1 }];
+  const plan = planSupply(args);
+  expect(plan.allocations.map(item => item.orderId)).toEqual(["O1"]);
 });
 test("excludes holds, unreleased, missing/expired shelf life and wrong product", () => {
   for (const update of [{ reasons: ["COLD_CHAIN_HOLD"] }, { reasons: ["BATCH_NOT_RELEASED"] }, { expiresAt: null }, { expiresAt: "2029-01-01" }, { vaccineType: "OTHER" }]) {

@@ -40,6 +40,11 @@ export const fetchManufacturerWorkflow = async () => {
   return res.data;
 };
 
+export const createManufacturerBatch = async (payload) => {
+  const res = await API.post("/manufacturer/workflow", payload);
+  return res.data;
+};
+
 export const fetchDistributorWorkflow = async () => {
   const res = await API.get("/distribution/distributor/workflow");
   return res.data;

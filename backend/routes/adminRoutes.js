@@ -8,13 +8,23 @@ const {
   runSentimentMonitoring,
   getReportsAndInsights,
   getAdminWorkflow,
+  getColdChainReviewers,
+  setColdChainReviewer,
 } = require("../controllers/adminController");
+const { getSystemReadiness } = require("../services/systemReadiness");
+const { listEmailDeliveries } = require("../controllers/emailDeliveryController");
 
 router.get("/users", authenticate, getUserManagement);
 router.get("/monitoring", authenticate, getChainMonitoring);
 router.post("/sentiment", authenticate, runSentimentMonitoring);
 router.get("/reports", authenticate, getReportsAndInsights);
 router.get("/workflow", authenticate, getAdminWorkflow);
+router.get("/readiness", getSystemReadiness);
+router.get("/email-deliveries", listEmailDeliveries);
+router.post("/forecast-plan", require("../controllers/analyticsController").createPlan);
+router.post("/forecast-plan/:id/approve", require("../controllers/analyticsController").approvePlan);
+router.get("/cold-chain/reviewers", getColdChainReviewers);
+router.patch("/cold-chain/reviewers/:userId", setColdChainReviewer);
 router.get("/supply-plan/inputs", async (req, res) => {
   try { res.json({ orders: await require("../models/Order").find({ status: "Pending" }).lean(), inventory: await require("../services/inventoryEligibility").inventorySnapshot() }); }
   catch (_) { res.status(503).json({ error: "Planning inputs unavailable" }); }

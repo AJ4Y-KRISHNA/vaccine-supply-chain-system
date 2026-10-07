@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from pydantic import Field
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 from forecasting.baselines import forecast
 from ingestion.demand_dataset import load_dataset
 
@@ -26,8 +26,10 @@ class ForecastSupplyContext(BaseModel):
 
 class ForecastRequest(BaseModel):
     vaccination_data: Optional[List[float]] = None
+    provenance: Optional[Dict] = None
     source_csv: Optional[str] = None
     months: Optional[int] = 12
+    horizon: int = Field(default=6, ge=1, le=24)
     supply_context: Optional[ForecastSupplyContext] = None
 
 
@@ -42,9 +44,9 @@ async def forecast_demand(data: ForecastRequest):
     try:
         if data.vaccination_data is not None:
             context = _supply_context_dict(data.supply_context)
-            return forecast(data.vaccination_data, supply_context=context)
+            return forecast(data.vaccination_data, data.provenance, context, data.horizon)
         series, provenance = load_dataset(data.source_csv, data.months or 12)
         context = _supply_context_dict(data.supply_context)
-        return forecast(series, provenance, context)
+        return forecast(series, provenance, context, data.horizon)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))

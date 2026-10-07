@@ -18,6 +18,8 @@ const orderSchema = new mongoose.Schema(
     allocatedBatchId: String,
     shipmentId: String,
     distributor: String,
+    // Historical demand owner, not an assertion of physical batch allocation.
+    manufacturer: String,
     centerId: String,
     region: String,
     vaccineType: String,
@@ -27,6 +29,9 @@ const orderSchema = new mongoose.Schema(
       default: "Normal",
     },
     notes: String,
+    source: { type: String, enum: ["simulator", "manual", "csv"], default: "simulator" },
+    enteredBy: String,
+    note: String,
     status: {
       type: String,
       default: "Pending",

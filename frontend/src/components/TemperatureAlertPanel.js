@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Bell, CheckCircle2, MapPin, RefreshCw, Thermometer } from "lucide-react";
 import { useToast } from "./Toast";
 import ColdChainPolicyForm from "./ColdChainPolicyForm";
+import StatusBadge from "./StatusBadge";
 import {
   acknowledgeTemperatureAlert,
   fetchTemperatureAlertSummary,
@@ -11,6 +12,8 @@ import {
   actOnColdChainAlert,
   fetchColdChainAlert,
 } from "../services/alerts";
+import useDashboardRealtime from "../hooks/useDashboardRealtime";
+import SourceBadge from "./SourceBadge";
 
 const EMPTY_SUMMARY = { active: 0, critical: 0, warning: 0, resolved: 0, recent: [] };
 const EMPTY_FILTERS = { status: "", severity: "", batchId: "", from: "", to: "" };
@@ -37,6 +40,7 @@ function SummaryCard({ label, value, tone }) {
 }
 
 export default function TemperatureAlertPanel({ role }) {
+  const realtime = useDashboardRealtime();
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [alerts, setAlerts] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -48,6 +52,7 @@ export default function TemperatureAlertPanel({ role }) {
   const [actionId, setActionId] = useState("");
   const [pendingAction, setPendingAction] = useState(null);
   const [auditTrail, setAuditTrail] = useState([]);
+  const [selectedDetails, setSelectedDetails] = useState(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [filterError, setFilterError] = useState("");
   const [readingNotification, setReadingNotification] = useState("");
@@ -88,9 +93,16 @@ export default function TemperatureAlertPanel({ role }) {
     load();
   }, [load]);
   useEffect(() => {
+    if (realtime.event && ["ALERT_OPENED", "ALERT_UPDATED", "ALERT_CLOSED", "AI_ADVISORY_UPDATED", "ANCHORING_STATUS", "NOTIFICATION"].includes(realtime.event.type)) load();
+    if (selectedAlert && ["AI_ADVISORY_UPDATED", "ANCHORING_STATUS"].includes(realtime.event?.type)) {
+      fetchColdChainAlert(selectedAlert.alertId).then(details => setSelectedDetails(details)).catch(() => {});
+    }
+  }, [realtime.event, load, selectedAlert]);
+  useEffect(() => {
+    if (realtime.status === "live") return undefined;
     const timer = setInterval(() => { if (!pendingAction && !actionId && document.visibilityState !== "hidden") load(); }, 5000);
     return () => clearInterval(timer);
-  }, [load, pendingAction, actionId]);
+  }, [load, pendingAction, actionId, realtime.status]);
 
   const applyFilters = () => {
     if (filters.from && filters.to && filters.from > filters.to) { setFilterError("From date must be on or before To date."); return; }
@@ -136,10 +148,10 @@ export default function TemperatureAlertPanel({ role }) {
     const sequence = ++detailSequence.current;
     const closing = selectedAlert?.alertId === alert.alertId;
     setSelectedAlert(closing ? null : alert);
-    setAuditTrail([]);
+    setAuditTrail([]); setSelectedDetails(null);
     if (closing) { setAuditLoading(false); return; }
     setAuditLoading(true);
-    try { const details = await fetchColdChainAlert(alert.alertId); if (sequence === detailSequence.current) setAuditTrail(details.auditTrail || []); }
+    try { const details = await fetchColdChainAlert(alert.alertId); if (sequence === detailSequence.current) { setAuditTrail(details.auditTrail || []); setSelectedDetails(details); } }
     catch (_) { if (sequence === detailSequence.current) addToast("error", "Audit history could not be loaded"); }
     finally { if (sequence === detailSequence.current) setAuditLoading(false); }
   };
@@ -175,6 +187,7 @@ export default function TemperatureAlertPanel({ role }) {
             Explainable cold-chain rules — software prototype, not a vaccine safety determination. Normal readings do not automatically release quarantine.
           </p>
         </div>
+        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${realtime.status === "live" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`} role="status">{realtime.status === "live" ? "Live" : "Degraded · polling fallback"}</span>
         <button type="button" onClick={load} disabled={loading} className="inline-flex items-center justify-center gap-2 rounded-lg border border-[#dbe6f2] px-3 py-1.5 text-xs font-semibold text-[#4b6b90] hover:bg-[#f4f8fd] disabled:opacity-60">
           <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Refresh
         </button>
@@ -224,8 +237,9 @@ export default function TemperatureAlertPanel({ role }) {
                 <button type="button" aria-expanded={selectedAlert?.alertId === alert.alertId} onClick={() => selectAlert(alert)} className="min-w-0 break-words text-left">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-semibold text-[#42566f]">{alert.batchId || "Unassigned batch"}</span>
-                    <span className={`rounded-md px-2 py-1 text-[11px] font-semibold ${alert.severity === "CRITICAL" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700"}`}>{alert.severity}</span>
-                    <span className={`rounded-md px-2 py-1 text-[11px] font-semibold ${alert.responseState === "RESOLVED" || alert.status === "RESOLVED" ? "bg-emerald-50 text-emerald-700" : alert.responseState === "OPEN" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700"}`}>{alert.responseState || (alert.status === "ACKNOWLEDGED" ? "ACKNOWLEDGED" : alert.status === "RESOLVED" ? "RESOLVED" : "OPEN")}</span>
+                    <StatusBadge value={alert.severity} />
+                    <StatusBadge value={alert.responseState || (alert.status === "ACKNOWLEDGED" ? "ACKNOWLEDGED" : alert.status === "RESOLVED" ? "RESOLVED" : "OPEN")} tone={alert.responseState === "RESOLVED" || alert.status === "RESOLVED" ? "success" : alert.responseState === "OPEN" ? "danger" : "warning"} />
+                    <SourceBadge source={alert.context?.source} />
                     {alert.escalated ? <span role="status" aria-label="Escalated alert" className="rounded-md bg-rose-100 px-2 py-1 text-[11px] font-bold text-rose-800">Escalated</span> : null}
                   </div>
                   <p className="mt-2 text-sm text-[#526a86]">{alert.reason}</p>
@@ -254,8 +268,12 @@ export default function TemperatureAlertPanel({ role }) {
                 <div><b>Confidence:</b> {alert.confidence?.level || "Unknown"} — {alert.confidence?.basis}</div>
                 <div><b>Measured excursion:</b> {(alert.excursionDurationMs || 0) / 60000} minutes</div>
                 <div><b>Policy source:</b> {alert.policySnapshot?.sourceReference || "Legacy/unapproved"}</div>
-                <div><b>Reading source:</b> {alert.context?.source === "manual-override" ? `Manual override${alert.context?.overrideId ? ` · ${alert.context.overrideId}` : ""}` : alert.context?.source === "auto-simulated" ? "Automatic simulator" : alert.context?.source || "Unknown"}</div>
+                <div className="flex items-center gap-2"><b>Reading source:</b> <SourceBadge source={alert.context?.source} />{alert.context?.enteredBy ? <span>Entered by {alert.context.enteredBy}</span> : null}</div>
                 <div><b>Notification targets:</b> {(alert.notificationTargets || []).join(", ")}</div>
+                <div><b>Policy reason:</b> {alert.reason || "--"}</div>
+                <div className="md:col-span-2"><b>AI explanation (advisory only):</b> {alert.context?.anomalyInference?.reason || "Unavailable — policy rules remain authoritative."}</div>
+                <div><b>AI advisory label:</b> {alert.context?.anomalyInference?.status || "Not available"}</div>
+                <div><b>Sensor evidence anchoring:</b> {selectedDetails?.anchoringStatus || "pending"}</div>
                 <div className="break-words md:col-span-2"><b>Append-only audit history:</b>{auditLoading ? <p role="status">Loading audit history…</p> : auditTrail.map(entry => <p key={entry._id}>{entry.action} — {entry.reason} — simulation time {dateTime(entry.eventTime)} — recorded {dateTime(entry.recordedAt)} — {entry.actorId}</p>)}</div>
                 {alert.resolutionReason ? <div className="md:col-span-2"><b>Resolution:</b> {alert.resolutionReason}</div> : null}
               </div> : null}
@@ -270,6 +288,8 @@ export default function TemperatureAlertPanel({ role }) {
           {notifications.slice(0, 6).map((notification) => <div key={notification._id} className={`rounded-lg border px-3 py-2 text-sm ${notification.read ? "border-[#edf2f8] bg-white text-[#7c8da3]" : "border-blue-100 bg-blue-50 text-[#42566f]"}`}>
             <button type="button" disabled={notification.read || readingNotification === notification._id} title={notification.read ? "Notification read" : "Mark notification as read"} onClick={() => markRead(notification)} className="block w-full text-left disabled:cursor-default"><div className="flex items-center justify-between gap-2"><span className="font-semibold">{notification.title}</span>{notification.read ? <CheckCircle2 size={15} className="text-emerald-600" /> : <AlertTriangle size={15} className="text-amber-600" />}</div><p className="mt-1 text-xs">{notification.message}</p></button>
             {notification.metadata?.deepLink ? <a href={notification.metadata.deepLink} className="mt-2 inline-block text-xs font-semibold text-blue-700 underline">Open shipment timeline / Batch Story</a> : null}
+            {notification.emailPreviewLinks?.map((preview, index) => preview.url ? <a key={`${notification._id}-email-${index}`} href={preview.url}
+              target="_blank" rel="noreferrer" className="ml-3 mt-2 inline-block text-xs font-semibold text-emerald-700 underline">Open captured demo email</a> : null)}
           </div>)}
           {!notifications.length ? <div className="text-sm text-[#8aa0ba]">No temperature application notifications.</div> : null}
         </div>

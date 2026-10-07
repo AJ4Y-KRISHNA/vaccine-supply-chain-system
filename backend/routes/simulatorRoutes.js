@@ -16,6 +16,8 @@ const overrideController = require("../controllers/simulatorOverrideController")
 
 // Real current identities are required even when AUTH_OPTIONAL is enabled elsewhere.
 router.use(requireIdentity);
+router.use((req, res, next) => process.env.DATA_MODE === "manual"
+  ? res.status(409).json({ error: "Simulator is disabled in DATA_MODE=manual" }) : next());
 router.use(async (_req, res, next) => {
   try { await require("../controllers/simulatorController").simulatorManager.initialize(); next(); }
   catch (_) { res.status(503).json({ error: "Unable to load durable simulator state" }); }

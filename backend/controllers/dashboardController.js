@@ -277,6 +277,7 @@ exports.getDistributorDashboard = async (_req, res) => {
     const deliveryHistory = buildShipmentActivitySeries(shipments);
 
     res.json({
+      identity: { distributor: _req.user?.distributor || _req.user?.email || "" },
       totals: {
         totalShipments: shipments.length,
         inTransit,
@@ -327,6 +328,7 @@ exports.getManufacturerDashboard = async (_req, res) => {
     const pendingShipments = batches.filter((batch) => !batch.releaseVisibleToExternal).length;
 
     res.json({
+      identity: { manufacturer: _req.user?.manufacturer || _req.user?.email || "" },
       cards: {
         totalBatches: batches.length,
         pendingShipments,
@@ -345,6 +347,7 @@ exports.getManufacturerDashboard = async (_req, res) => {
         batchId: batch.batchId,
         vaccineType: batch.vaccineType,
         quantity: batch.quantity,
+        expiresAt: batch.expiresAt,
         status: batch.status || "Manufactured",
         coldChainStatus: batch.coldChainStatus || "",
         txHash: batch.txHash,
@@ -389,7 +392,8 @@ exports.getHealthcareDashboard = async (_req, res) => {
   try {
     const vaccinations = await Vaccination.find(_req.scope.vaccination).sort({ date: -1 }).lean();
     const shipments = await Shipment.find(_req.scope.shipment).sort({ lastUpdatedAt: -1 }).lean();
-    const dailyProgress = buildSevenDaySeries(vaccinations, "date", "dosesUsed");
+    const administrations = vaccinations.filter(entry => entry.workflowStage === "1.3 Administer Vaccines" || entry.eventType === "Vaccination" || entry.administrationStatus === "Administered");
+    const dailyProgress = buildSevenDaySeries(administrations, "date", "dosesUsed");
     const inventory = computeHealthcareInventory(vaccinations);
 
     res.json({
@@ -399,6 +403,7 @@ exports.getHealthcareDashboard = async (_req, res) => {
         vaccinatedToday: inventory.vaccinatedToday,
         lowAlerts: inventory.lowAlerts,
       },
+      identity: { hospital: _req.user?.hospital || _req.user?.email || "" },
       stockBreakdown: inventory.stockBreakdown,
       stockDetails: inventory.stockDetails,
       usageLogs: vaccinations.slice(0, 5),
@@ -426,7 +431,7 @@ exports.getHealthcareDashboard = async (_req, res) => {
           const status = String(shipment.status || "").toLowerCase();
           return (
             !shipment.hospitalConfirmed &&
-            (status.includes("supplied") || status.includes("delivered") || status.includes("new shipment required"))
+            (status.includes("supplied") || status.includes("delivered"))
           );
         })
         .slice(0, 8)

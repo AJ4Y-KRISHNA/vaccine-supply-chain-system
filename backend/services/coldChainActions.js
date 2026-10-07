@@ -2,17 +2,21 @@ const Batch = require("../models/Batch");
 const Shipment = require("../models/Shipment");
 const Notification = require("../models/Notification");
 const ColdChainAudit = require("../models/ColdChainAudit");
+const emailOutbox = require("./emailOutbox");
+const logger = require("./structuredLogger");
 const HOLD_STATUS = "Quarantined—pending quality review";
 const normaliseKey = (value) => String(value || "").trim().toLowerCase();
 async function audit(alert, action, actorId, reason, eventTime, snapshot = {}) {
-  return ColdChainAudit.create({ batchId: alert.batchId, alertId: alert.alertId, action, actorId, reason, eventTime, snapshot });
+  const record = await ColdChainAudit.create({ batchId: alert.batchId, alertId: alert.alertId,
+    correlationId: alert.correlationId, action, actorId, reason, eventTime, snapshot });
+  logger.info("cold_chain.audit.recorded", { correlationId: alert.correlationId, batchId: alert.batchId, alertId: alert.alertId, action });
+  return record;
 }
-async function notify(alert, stage) {
+async function notify(alert, stage, { dispatch = false } = {}) {
   const recipients = [{ recipientRole: "admin", recipientRefKey: "" }];
-  const [batch, shipment] = await Promise.all([
-    Batch.findOne({ batchId: alert.batchId }).select("manufacturer vaccineType").lean(),
-    alert.shipmentId ? Shipment.findOne({ shipmentId: alert.shipmentId, batchId: alert.batchId }).lean() : null,
-  ]);
+  // Sequential queries are required inside a MongoDB transaction.
+  const batch = await Batch.findOne({ batchId: alert.batchId }).select("manufacturer vaccineType").lean();
+  const shipment = alert.shipmentId ? await Shipment.findOne({ shipmentId: alert.shipmentId, batchId: alert.batchId }).lean() : null;
   const manufacturerKey = alert.manufacturerKey || normaliseKey(batch?.manufacturer);
   if (manufacturerKey) recipients.push({ recipientRole: "manufacturer", recipientRefKey: manufacturerKey });
   // Route only through the shipment attached to this event. A batch may have
@@ -20,6 +24,12 @@ async function notify(alert, stage) {
   if (shipment?.distributor) recipients.push({ recipientRole: "distributor", recipientRefKey: normaliseKey(shipment.distributor) });
   if (shipment?.destination) recipients.push({ recipientRole: "healthcare", recipientRefKey: normaliseKey(shipment.destination) });
   const unique = [...new Map(recipients.map(r => [`${r.recipientRole}:${r.recipientRefKey}`, r])).values()];
+  if (require("./eventBackbone").enabled() && !dispatch) {
+    alert.notificationTargets = [...new Set([...(alert.notificationTargets || []), ...unique.map(r => `${r.recipientRole}:${r.recipientRefKey || "all"}`)])];
+    await alert.save();
+    await require("./notificationDispatcher").enqueue(alert, stage);
+    return;
+  }
   const source = alert.context?.source || "temperature-ingestion";
   const automaticSimulator = ["auto-simulated", "software-iot-simulator"].includes(source);
   const sourceLabel = source === "manual-override" || alert.context?.overrideId
@@ -40,9 +50,10 @@ async function notify(alert, stage) {
   const message = `${alert.reason} Shipment ${shipmentId} · Batch ${alert.batchId} · ${vaccine}. ${metric} breached limit ${limit}; current reading ${reading}; duration ${durationMinutes.toFixed(2)} simulated minutes. Source: ${sourceLabel}. Distributor: ${distributor}; hospital: ${hospital}. Recommended action: ${alert.recommendedAction}`;
   for (const recipient of unique) {
     const deduplicationKey = `${alert.alertId}:${stage}:${recipient.recipientRole}:${recipient.recipientRefKey}`;
-    const deepLink = `${rolePath[recipient.recipientRole] || "/admin"}#shipment-journey`;
-    await Notification.updateOne({ deduplicationKey }, { $setOnInsert: {
+    const deepLink = `${rolePath[recipient.recipientRole] || "/admin"}?batchId=${encodeURIComponent(alert.batchId)}#shipment-journey`;
+    const notification = await Notification.findOneAndUpdate({ deduplicationKey }, { $setOnInsert: {
       ...recipient, recipientRef: recipient.recipientRefKey, deduplicationKey,
+      correlationId: alert.correlationId,
       alertId: alert.alertId, auditBatchId: alert.batchId,
       title: `Application Notification: ${stage.replaceAll("_", " ")}`,
       message,
@@ -54,11 +65,19 @@ async function notify(alert, stage) {
         metric: alert.metric, breachedLimit: alert.breachedLimit,
         currentReading: alert.currentReading || { temperature: alert.currentTemperature, humidity: alert.currentHumidity },
         excursionDurationMs: alert.excursionDurationMs || 0, recommendedAction: alert.recommendedAction,
-        deepLink },
-    } }, { upsert: true });
+        deepLink, correlationId: alert.correlationId },
+    } }, { upsert: true, new: true, setDefaultsOnInsert: true });
+    logger.info("notification.persisted", { correlationId: alert.correlationId, batchId: alert.batchId,
+      alertId: alert.alertId, recipientRole: recipient.recipientRole });
+    await require("./dashboardEventBus").publishNotification(notification);
+    if (dispatch || ["admin", "manufacturer"].includes(recipient.recipientRole)) {
+      try { await emailOutbox.enqueueForNotification(notification); }
+      catch (error) { if (dispatch) throw error; console.error("Alert email queue unavailable; the in-app notification was saved:", error.message); }
+    }
   }
   alert.notificationTargets = [...new Set([...(alert.notificationTargets || []), ...unique.map(r => `${r.recipientRole}:${r.recipientRefKey || "all"}`)])];
-  await alert.save();
+  if (dispatch) await require("../models/TemperatureAlert").updateOne({ alertId: alert.alertId }, { $addToSet: { notificationTargets: { $each: alert.notificationTargets } } });
+  else await alert.save();
 }
 async function quarantine(alert, actorId, reason, eventTime) {
   const isNewHold = !alert.requiresQualityReview;

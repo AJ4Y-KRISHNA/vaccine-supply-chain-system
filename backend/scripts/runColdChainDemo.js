@@ -92,7 +92,7 @@ async function main() {
       approvalReason: "User-authorized automated demo on zero-dose synthetic batch only; not medical or regulatory approval",
     }, 201);
     await call("POST", "/simulator/devices", accounts.admin, { deviceId, vehicleId: "DEMO-TRUCK-01", batchId, shipmentId,
-      scenario: "HIGH_TEMPERATURE", seed: "cold-chain-reviewed-demo-v1", startTime: "2026-01-01T00:00:00.000Z",
+      scenario: "HIGH_TEMPERATURE", seed: "cold-chain-reviewed-demo-v1", startTime: new Date().toISOString(),
       tickIntervalMs: 60000, temperatureRange: { min: 2, max: 8 }, initialBatteryLevel: 100,
       route: [{ latitude: 9.9312, longitude: 76.2673 }, { latitude: 9.9412, longitude: 76.2773 }],
     }, 201);

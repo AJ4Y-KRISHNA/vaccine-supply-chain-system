@@ -28,6 +28,8 @@ The page is available at `/admin/manual-simulator` only while the frontend featu
 8. Press **Return to automatic** to release the active override. Generate another reading and confirm that the source returns to the automatic simulator. Releasing the override does not clear a cold-chain quality hold.
 9. If a batch is quarantined, keep it held until the existing authorized quality-review process has valid recovery evidence and records a review/clear action. A normal reading or returning the device to automatic mode does not release it.
 
+For a complete, repeatable high-temperature and low-humidity class demonstration—including recipient checks, acknowledgement, automatic recovery, reviewer clearance, and test commands—follow [MANUAL_OVERRIDE_END_TO_END.md](MANUAL_OVERRIDE_END_TO_END.md).
+
 ## Controls and feedback
 
 - Selectors are limited to shipments returned by the authenticated simulator input endpoint. Batch and vaccine details are resolved from the selected shipment.
@@ -48,7 +50,7 @@ The frontend hides the page when its build-time feature flag is absent/false and
 - Jobs and per-batch locks are single-process. Run one backend process for the demo; locks are not distributed across backend workers.
 - A policy without humidity limits will not evaluate humidity excursions. The console displays that condition and does not invent a humidity range.
 - Alert/quarantine duration, sensor gaps and expiry use the simulation clock. Use sufficient ticks at valid timestamps to demonstrate sustained conditions. A normal reading, pausing, release, or expiry does not clear a quality hold.
-- No email, SMS, external API or real notification is sent by this feature.
+- The override console itself does not directly send external messages. Resulting policy alerts retain in-app notifications and may use the separately configured optional email outbox; SMS is not implemented.
 
 ## Verification
 

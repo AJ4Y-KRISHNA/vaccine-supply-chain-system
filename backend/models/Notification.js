@@ -13,6 +13,7 @@ const notificationSchema = new mongoose.Schema(
       type: String,
       index: true,
     },
+    correlationId: { type: String, maxlength: 128, index: true },
     deduplicationKey: {
       type: String,
       unique: true,
@@ -31,6 +32,11 @@ const notificationSchema = new mongoose.Schema(
       default: false,
     },
     metadata: mongoose.Schema.Types.Mixed,
+    emailPreviewLinks: [{
+      url: { type: String, required: true },
+      transportMode: { type: String, enum: ["ethereal"] },
+      capturedAt: { type: Date, default: Date.now },
+    }],
   },
   { timestamps: true }
 );

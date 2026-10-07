@@ -36,3 +36,6 @@ coverage/
 
 # Mongo local files
 data/
+
+# Local synthetic evaluation reports (CI uploads these as artifacts)
+results/*.json

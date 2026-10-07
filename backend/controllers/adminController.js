@@ -5,9 +5,17 @@ const Distribution = require("../models/Distribution");
 const TemperatureLog = require("../models/TemperatureLog");
 const Vaccination = require("../models/Vaccination");
 const AdminAction = require("../models/AdminAction");
+const ReviewerPermissionAudit = require("../models/ReviewerPermissionAudit");
 const { getForecast, getSentiment } = require("../services/aiService");
 const { getForecastSupplyContext } = require("../services/forecastSupplyContext");
 const { logLifecycleEventOnChain, extractHash } = require("../services/blockchainService");
+
+let reviewerPermissionQueue = Promise.resolve();
+function withReviewerPermissionLock(work) {
+  const current = reviewerPermissionQueue.catch(() => {}).then(work);
+  reviewerPermissionQueue = current.catch(() => {});
+  return current;
+}
 
 exports.getUserManagement = async (_req, res) => {
   try {
@@ -204,4 +212,45 @@ exports.getAdminWorkflow = async (_req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+};
+
+exports.getColdChainReviewers = async (_req, res) => {
+  try {
+    const [users, audit] = await Promise.all([
+      User.find({ role: { $in: ["admin", "manufacturer"] } }).select("email role manufacturer canReviewColdChain disabled").sort({ email: 1 }).lean(),
+      ReviewerPermissionAudit.find().sort({ eventTime: -1 }).limit(100).lean(),
+    ]);
+    return res.json({ reviewers: users.map(user => ({ userId: String(user._id), email: user.email, role: user.role,
+      organization: user.manufacturer || "", canReviewColdChain: user.canReviewColdChain === true, disabled: Boolean(user.disabled) })), audit });
+  } catch (_) { return res.status(503).json({ error: "Reviewer permissions are unavailable" }); }
+};
+
+exports.setColdChainReviewer = async (req, res) => {
+  const Joi = require("joi");
+  const { error, value } = Joi.object({ canReviewColdChain: Joi.boolean().strict().required(), reason: Joi.string().trim().min(3).max(1000).required() }).validate(req.body, { abortEarly: false });
+  if (error) return res.status(400).json({ error: error.message });
+  if (!require("mongoose").isValidObjectId(req.params.userId)) return res.status(400).json({ error: "Invalid user id" });
+  return withReviewerPermissionLock(async () => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user || !["admin", "manufacturer"].includes(user.role)) return res.status(404).json({ error: "Eligible reviewer account not found" });
+    if (value.canReviewColdChain && user.disabled) return res.status(409).json({ error: "Disabled accounts cannot be designated as reviewers" });
+    const previousPermission = user.canReviewColdChain === true;
+    if (previousPermission === value.canReviewColdChain) return res.json({ reviewer: { userId: String(user._id), email: user.email, role: user.role, canReviewColdChain: previousPermission }, unchanged: true });
+    if (!value.canReviewColdChain && previousPermission && !user.disabled) {
+      const activeReviewers = await User.countDocuments({ role: { $in: ["admin", "manufacturer"] }, canReviewColdChain: true, disabled: { $ne: true } });
+      if (activeReviewers <= 1) return res.status(409).json({ error: "At least one active cold-chain reviewer must remain designated" });
+    }
+    const now = new Date();
+    const action = value.canReviewColdChain ? "GRANT" : "REVOKE";
+    const Audit = ReviewerPermissionAudit;
+    await Audit.create({ targetUserId: String(user._id), targetEmail: user.email, actorId: req.user.id,
+      action: `${action}_REQUESTED`, previousPermission, requestedPermission: value.canReviewColdChain, reason: value.reason, eventTime: now });
+    user.canReviewColdChain = value.canReviewColdChain;
+    await user.save();
+    await Audit.create({ targetUserId: String(user._id), targetEmail: user.email, actorId: req.user.id,
+      action: `${action}_APPLIED`, previousPermission, requestedPermission: value.canReviewColdChain, reason: value.reason, eventTime: new Date() });
+    return res.json({ reviewer: { userId: String(user._id), email: user.email, role: user.role, canReviewColdChain: value.canReviewColdChain } });
+  } catch (_) { return res.status(503).json({ error: "Reviewer permission change could not be completed; refresh permissions before retrying" }); }
+  });
 };

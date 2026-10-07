@@ -60,3 +60,45 @@ export async function getSimulatorRoutes(token, { signal } = {}) {
   }
   return result.simulations;
 }
+
+/** Load all persisted readings using the backend's keyset cursor; no client-side history cap. */
+export async function getShipmentTemperatureHistory(token, shipmentId, { signal, pageSize = 500 } = {}) {
+  const safeShipmentId = String(shipmentId || "").trim();
+  if (!safeShipmentId) throw new Error("Select a shipment before loading its sensor history.");
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 1000) {
+    throw new Error("History page size must be between 1 and 1000.");
+  }
+  const records = [];
+  let cursor = null;
+  do {
+    const params = new URLSearchParams({ limit: String(pageSize) });
+    if (cursor) params.set("cursor", cursor);
+    const result = await request(
+      `/live-shipments/${encodeURIComponent(safeShipmentId)}/temperature-history?${params}`,
+      { token, signal },
+    );
+    if (!Array.isArray(result.records)) throw new Error("The backend returned an unexpected sensor-history page.");
+    records.push(...result.records.map((record) => ({
+      readingId: record.readingId || null,
+      sequenceNumber: record.sequenceNumber ?? null,
+      temperature: record.temperature ?? null,
+      humidity: record.humidity ?? null,
+      battery: record.batteryLevel ?? null,
+      speed: null,
+      gpsLat: record.location?.lat ?? null,
+      gpsLng: record.location?.lng ?? null,
+      vehicleId: record.vehicleId || null,
+      deviceId: record.deviceId || null,
+      source: record.source || "unknown",
+      simulationClock: record.recordedAt || null,
+      status: record.status || null,
+    })));
+    cursor = result.hasMore ? result.nextCursor : null;
+    if (result.hasMore && !cursor) throw new Error("The backend omitted the next sensor-history cursor.");
+  } while (cursor && !signal?.aborted);
+  return records;
+}
+
+export async function submitManualReading(token, reading) {
+  return request("/readings/manual", { token, method: "POST", body: JSON.stringify(reading) });
+}

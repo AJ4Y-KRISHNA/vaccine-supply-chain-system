@@ -3,20 +3,21 @@ import {
   Activity,
   Bell,
   Clock3,
-  Droplets,
   MapPin,
   Route,
   ShieldCheck,
   Snowflake,
-  Thermometer,
   Truck,
   Wifi,
   WifiOff,
 } from "lucide-react";
 import TruckRoadScene from "./components/TruckRoadScene.jsx";
+import AlertFeed, { CriticalAlertBanner, getUnreadAlertCount } from "./components/AlertFeed.jsx";
+import ManualOverrideConsole from "./components/ManualOverrideConsole.jsx";
+import ManualReadingForm from "./components/ManualReadingForm.jsx";
 import ShipmentAccessPanel from "./components/ShipmentAccessPanel.jsx";
 import useFieldOperatorSocket from "./hooks/useFieldOperatorSocket.js";
-import { getSimulatorRoutes } from "./services/fieldOperatorApi.js";
+import { getShipmentTemperatureHistory, getSimulatorRoutes } from "./services/fieldOperatorApi.js";
 import { useFieldOperatorStore } from "./stores/fieldOperatorStore.js";
 import {
   etaMinutes,
@@ -31,6 +32,7 @@ import {
 
 const ShipmentMap = lazy(() => import("./components/ShipmentMap.jsx"));
 const TelemetryGauges = lazy(() => import("./components/TelemetryGauges.jsx"));
+const SensorHistoryCharts = lazy(() => import("./components/SensorHistoryCharts.jsx"));
 
 const sections = [
   { number: "01", title: "Truck scene", subtitle: "Shipment and cold-chain state", icon: Truck },
@@ -224,17 +226,30 @@ function App() {
   const simulationClock = useFieldOperatorStore((state) => state.simulationClock);
   const telemetry = useFieldOperatorStore((state) => state.telemetry);
   const readingHistory = useFieldOperatorStore((state) => state.readingHistory);
+  const setReadingHistory = useFieldOperatorStore((state) => state.setReadingHistory);
+  const alerts = useFieldOperatorStore((state) => state.alerts);
+  const acknowledgeAlert = useFieldOperatorStore((state) => state.acknowledgeAlert);
   const progress = useFieldOperatorStore((state) => state.progress);
   const coldChainStatus = useFieldOperatorStore((state) => state.coldChainStatus);
   const initMessage = useFieldOperatorStore((state) => state.initMessage);
+  const activeOverride = useFieldOperatorStore((state) => state.activeOverride);
   const [simulatorRouteState, setSimulatorRouteState] = useState({
     status: "idle",
     points: [],
     running: null,
   });
+  const [historyLoadState, setHistoryLoadState] = useState("idle");
   const selectedShipment =
     shipments.find((shipment) => shipment.shipmentId === selectedShipmentId) || null;
   const selectedShipmentIsAvailable = shipmentLoadStatus === "ready" && Boolean(selectedShipment);
+  const unreadAlertCount = getUnreadAlertCount(alerts);
+  const activeCriticalAlert = [...alerts]
+    .reverse()
+    .find(
+      (alert) =>
+        !alert.acknowledged && alert.status !== "RESOLVED" &&
+        ["critical", "high"].includes(String(alert.severity).toLowerCase()),
+    );
 
   const restTelemetry = useMemo(
     () => normalizeRestTelemetry(selectedShipment?.latestTelemetry),
@@ -333,7 +348,27 @@ function App() {
     return () => controller.abort();
   }, [accessToken, role, selectedShipmentId, selectedShipmentIsAvailable]);
 
-  useFieldOperatorSocket({
+  useEffect(() => {
+    if (!accessToken || !selectedShipmentIsAvailable || !selectedShipmentId) {
+      setHistoryLoadState("idle");
+      return undefined;
+    }
+    const controller = new AbortController();
+    setHistoryLoadState("loading");
+    getShipmentTemperatureHistory(accessToken, selectedShipmentId, { signal: controller.signal })
+      .then((history) => {
+        if (controller.signal.aborted) return;
+        setReadingHistory(history);
+        setHistoryLoadState("ready");
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setHistoryLoadState(error.message || "Sensor history could not be loaded.");
+      });
+    return () => controller.abort();
+  }, [accessToken, selectedShipmentId, selectedShipmentIsAvailable, setReadingHistory]);
+
+  const { sendCommand } = useFieldOperatorSocket({
     shipmentId: selectedShipmentIsAvailable ? selectedShipmentId : "",
     accessToken,
   });
@@ -373,6 +408,23 @@ function App() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            <a
+              href="#section-06"
+              className="relative inline-flex h-11 items-center gap-1.5 rounded-input border border-border bg-surface px-2.5 text-xs text-text-secondary hover:border-primary/50 hover:text-primary"
+              aria-label={
+                unreadAlertCount
+                  ? `${unreadAlertCount} unread alert${unreadAlertCount === 1 ? "" : "s"}`
+                  : "Alert feed"
+              }
+            >
+              <Bell aria-hidden="true" className="h-4 w-4" />
+              <span className="hidden sm:inline">Alerts</span>
+              {unreadAlertCount > 0 && (
+                <span className="rounded-pill bg-danger px-1.5 py-0.5 text-[10px] font-semibold leading-none text-text-primary">
+                  {unreadAlertCount > 99 ? "99+" : unreadAlertCount}
+                </span>
+              )}
+            </a>
             <span
               className={`inline-flex items-center gap-1.5 rounded-pill border px-2.5 py-1 text-xs sm:px-3 ${connection.style}`}
               aria-live="polite"
@@ -380,9 +432,9 @@ function App() {
               <ConnectionIcon aria-hidden="true" className="h-3.5 w-3.5" />
               <span>{connection.label}</span>
             </span>
-            <span className="hidden items-center gap-1.5 text-xs text-text-muted lg:inline-flex">
+            <span className="hidden items-center gap-1.5 text-xs text-text-muted lg:inline-flex" aria-label={`Simulation clock: ${simulationClock || "waiting for sensor data"}`}>
               <Clock3 aria-hidden="true" className="h-3.5 w-3.5" />
-              <span className="max-w-40 truncate">{simulationClock || "Clock unavailable"}</span>
+              <span className="max-w-48 truncate">Simulation clock: {simulationClock || "waiting for sensor data"}</span>
             </span>
             <span className="rounded-pill border border-accent/30 bg-accent/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-accent sm:text-xs">
               Simulated
@@ -404,6 +456,12 @@ function App() {
               Select an in-transit shipment to establish its simulated cold-chain monitoring
               session.
             </p>
+            <p className="mt-3 inline-flex flex-wrap items-center gap-2 rounded-input border border-accent/30 bg-accent/5 px-3 py-2 text-xs text-text-secondary" role="status" aria-live="polite">
+              <Clock3 aria-hidden="true" className="h-4 w-4 text-accent" />
+              <span className="font-semibold text-text-primary">Simulation clock:</span>
+              <span className="operator-mono">{simulationClock || "waiting for sensor data"}</span>
+              <span>· Synthetic time; it may differ from your computer’s clock.</span>
+            </p>
           </div>
           <span
             className={`w-fit rounded-pill border px-3 py-1.5 text-xs font-medium ${connection.style}`}
@@ -413,6 +471,7 @@ function App() {
         </div>
 
         <ShipmentAccessPanel />
+        {role === "field_operator" && selectedShipmentIsAvailable && <ManualReadingForm token={accessToken} shipment={selectedShipment} telemetry={displayedTelemetry} />}
         {connectionError && selectedShipmentIsAvailable && (
           <p
             className="-mt-3 mb-6 rounded-input border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning"
@@ -426,6 +485,8 @@ function App() {
             {overviewMessage}
           </p>
         )}
+
+        <CriticalAlertBanner alert={activeCriticalAlert} />
 
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
           <section
@@ -528,6 +589,7 @@ function App() {
               <ShipmentMap
                 currentLocation={normalizedCurrentLocation}
                 routePoints={routePoints}
+                sourceMarkers={readingHistory.map(reading => ({ latitude: reading.gpsLat, longitude: reading.gpsLng, source: reading.source, recordedAt: reading.simulationClock }))}
                 routeSource={routeSource}
                 statusColor={statusColor}
                 originLabel={originLabel}
@@ -593,89 +655,63 @@ function App() {
             </p>
           </section>
 
-          <section
-            aria-labelledby="section-05"
-            className="operator-panel-surface p-5 sm:p-6 xl:col-span-7"
-          >
-            <SectionHeading {...sections[4]} />
-            <div className="rounded-input border border-warning/30 bg-warning/5 p-4">
-              <p className="text-sm font-medium text-warning">No manual changes are active</p>
-              <p className="mt-2 text-xs leading-5 text-text-secondary">
-                This panel will request simulator changes through the backend policy workflow. It
-                will not directly create or clear a safety alert.
-              </p>
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              {["Temperature target", "Humidity target", "Operator", "Last change"].map((label) => (
-                <div
-                  key={label}
-                  className="rounded-input border border-border bg-background/60 px-3 py-3"
-                >
-                  <p className="text-[10px] uppercase tracking-wide text-text-muted">{label}</p>
-                  <p className="operator-mono mt-2 text-xs text-text-muted">
-                    Available in a later step
-                  </p>
-                </div>
-              ))}
-            </div>
-          </section>
+          <ManualOverrideConsole
+            shipmentId={selectedShipmentId}
+            policy={policy}
+            telemetry={displayedTelemetry}
+            activeOverride={activeOverride}
+            simulationClock={simulationClock}
+            connectionStatus={connectionStatus}
+            sendCommand={sendCommand}
+          />
 
           <section
             aria-labelledby="section-06"
             className="operator-panel-surface p-5 sm:p-6 xl:col-span-12"
           >
-            <SectionHeading {...sections[5]} />
-            <div className="flex items-start gap-3 rounded-input border border-border bg-background/60 p-4">
-              <Bell aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-text-muted" />
-              <div>
-                <p className="text-sm font-medium text-text-secondary">No alert data available</p>
-                <p className="mt-1 text-xs leading-5 text-text-muted">
-                  This empty state means no readings have been loaded; it does not indicate that a
-                  shipment is within limits.
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {["Open", "Acknowledged", "Resolved"].map((status) => (
-                <span
-                  key={status}
-                  className="rounded-pill border border-border px-3 py-1 text-xs text-text-muted"
-                >
-                  {status}: —
-                </span>
-              ))}
-            </div>
+            <SectionHeading
+              {...sections[5]}
+              state={
+                alerts.length
+                  ? `${alerts.length} event${alerts.length === 1 ? "" : "s"}`
+                  : "No events yet"
+              }
+            />
+            <AlertFeed
+              alerts={alerts}
+              shipmentId={selectedShipmentId}
+              onAcknowledge={acknowledgeAlert}
+            />
           </section>
 
           <section
             aria-labelledby="section-07"
             className="operator-panel-surface p-5 sm:p-6 xl:col-span-12"
           >
-            <SectionHeading {...sections[6]} />
-            <div className="grid gap-4 lg:grid-cols-2">
-              {[
-                { label: "Temperature history", unit: "°C", icon: Thermometer },
-                { label: "Humidity history", unit: "% RH", icon: Droplets },
-              ].map(({ label, unit, icon: Icon }) => (
-                <div
-                  key={label}
-                  className="rounded-input border border-border bg-background/60 p-4"
-                >
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 text-sm font-medium text-text-secondary">
-                      <Icon aria-hidden="true" className="h-4 w-4 text-primary" />
-                      {label}
-                    </div>
-                    <span className="operator-mono text-xs text-text-muted">{unit}</span>
-                  </div>
-                  <Placeholder className="min-h-32">No sensor history to chart yet.</Placeholder>
-                </div>
-              ))}
-            </div>
-            <p className="mt-3 text-xs text-text-muted">
-              Approved policy thresholds and event markers will be added when real simulator history
-              is connected.
-            </p>
+            <SectionHeading
+              {...sections[6]}
+              state={
+                readingHistory.length
+                  ? `${readingHistory.length} saved + live samples`
+                  : displayedTelemetry
+                    ? "1 sample"
+                    : historyLoadState === "loading" ? "Loading saved history…" : "Awaiting readings"
+              }
+            />
+            {typeof historyLoadState === "string" && historyLoadState !== "idle" &&
+              historyLoadState !== "ready" && historyLoadState !== "loading" && (
+                <p className="mb-3 text-xs text-warning" role="status">Saved history could not be fully loaded: {historyLoadState}</p>
+              )}
+            <Suspense
+              fallback={<Placeholder className="min-h-52">Loading sensor history…</Placeholder>}
+            >
+              <SensorHistoryCharts
+                history={readingHistory}
+                latestReading={displayedTelemetry}
+                alerts={alerts}
+                policy={policy}
+              />
+            </Suspense>
           </section>
         </div>
 
