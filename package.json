@@ -1,0 +1,13 @@
+{
+  "name": "vaccine-supply-chain-system-demo",
+  "private": true,
+  "scripts": {
+    "seed": "node scripts/seed.js",
+    "acceptance:seed": "node backend/scripts/runSeedAcceptance.js",
+    "acceptance:events": "node backend/scripts/runEventBackboneAcceptance.js --execute",
+    "demo": "node scripts/run-demo.js",
+    "acceptance": "node scripts/acceptance.js",
+    "evaluate": "node scripts/evaluate.js",
+    "lint": "node scripts/lint.js"
+  }
+}

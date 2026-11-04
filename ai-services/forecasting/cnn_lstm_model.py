@@ -1,4 +1,5 @@
 import numpy as np
+import tensorflow as tf
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
@@ -57,7 +58,10 @@ class VaccineDemandForecast:
         self.model = model
 
     def train(self, vaccination_data):
-
+        if len(vaccination_data) < 6:
+            raise ValueError("At least six observations required for experimental training")
+        tf.keras.utils.set_random_seed(42)
+        tf.config.experimental.enable_op_determinism()
         X, y = self.prepare_data(vaccination_data)
 
         self.build_model((X.shape[1], 1))
@@ -66,15 +70,17 @@ class VaccineDemandForecast:
             X,
             y,
             epochs=10,
+            shuffle=False,
             verbose=0
         )
 
     def predict(self, vaccination_data):
-
-        X, y = self.prepare_data(vaccination_data)
-
-        prediction = self.model.predict(X[-1].reshape(1, X.shape[1], 1))
+        if self.model is None or len(vaccination_data) < 3:
+            raise ValueError("Train a model first and provide at least three observations")
+        # Do not refit the training scaler or reuse the penultimate training window.
+        latest = self.scaler.transform(np.asarray(vaccination_data[-3:]).reshape(-1, 1))
+        prediction = self.model.predict(latest.reshape(1, 3, 1), verbose=0)
 
         result = self.scaler.inverse_transform(prediction)
 
-        return int(result[0][0])
+        return max(0, int(np.ceil(result[0][0])))

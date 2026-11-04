@@ -1,6 +1,9 @@
 const mongoose = require("mongoose");
 
 const DistributionSchema = new mongoose.Schema({
+  // Optional: supplies use the shipment as their idempotency key. Older admin
+  // decision records are preserved without this field.
+  shipmentId: String,
   batchId: String,
   demand: Number,
   supply: Number,

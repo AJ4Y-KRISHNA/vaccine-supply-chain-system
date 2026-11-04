@@ -1,20 +1,13 @@
-const mongoose = require("mongoose");
-const User = require("./models/user");
-
-mongoose.connect("mongodb://127.0.0.1:27017/vaccineDB");
-
-async function seed() {
-  await User.deleteMany({});
-
-  await User.insertMany([
-    { email: "admin@test.com", password: "123456", role: "admin" },
-    { email: "manufacturer@test.com", password: "123456", role: "manufacturer" },
-    { email: "distributor@test.com", password: "123456", role: "distributor" },
-    { email: "hospital@test.com", password: "123456", role: "healthcare" }
-  ]);
-
-  console.log("✅ Users created");
-  process.exit();
+// Backward-compatible entry point for the earlier local seed command.
+require("dotenv").config({ path: require("node:path").resolve(__dirname, "../.env"), quiet: true });
+require("dotenv").config({ path: require("node:path").resolve(__dirname, ".env"), quiet: true });
+if (!process.argv.includes("--execute")) {
+  throw new Error("Use `npm run seed` (or `node seed.js --execute`) to create synthetic demo fixtures");
 }
-
-seed();
+if (!process.env.DEMO_SEED_PASSWORD && process.env.DEMO_ACCOUNT_PASSWORD) {
+  process.env.DEMO_SEED_PASSWORD = process.env.DEMO_ACCOUNT_PASSWORD;
+}
+require("./scripts/seed").seed().catch(error => {
+  console.error(`Synthetic seed failed: ${error.message}`);
+  process.exitCode = 1;
+});

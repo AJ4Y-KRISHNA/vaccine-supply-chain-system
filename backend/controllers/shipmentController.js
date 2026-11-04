@@ -20,7 +20,7 @@ exports.getShipments = async(req,res)=>{
 
 try{
 
-const shipments = await Shipment.find();
+const shipments = await Shipment.find(req.scope.shipment);
 
 res.json(shipments);
 

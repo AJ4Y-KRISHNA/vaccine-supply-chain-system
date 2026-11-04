@@ -37,10 +37,20 @@ const vaccinationSchema = new mongoose.Schema({
   txHash: String,
   healthAuthority: String,
   notes: String,
+  source: { type: String, enum: ["simulator", "manual", "csv"], default: "simulator" },
+  enteredBy: String,
+  note: String,
+  operationId: String,
+  operationFingerprint: String,
+  operationStatus: { type: String, enum: ["pending", "complete"] },
+  operationResult: mongoose.Schema.Types.Mixed,
   date: {
     type: Date,
     default: Date.now
   }
 });
+
+vaccinationSchema.index({ hospital: 1, operationId: 1 }, { unique: true, partialFilterExpression: { operationId: { $type: "string" } } });
+require("./demoFields")(vaccinationSchema);
 
 module.exports = mongoose.model("Vaccination",vaccinationSchema);

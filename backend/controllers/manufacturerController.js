@@ -6,6 +6,7 @@ const Distribution = require("../models/Distribution");
 const Vaccination = require("../models/Vaccination");
 const InventoryCertificate = require("../models/InventoryCertificate");
 const { getForecast } = require("../services/aiService");
+const { validateManufacturingInput } = require("../services/manufacturingInput");
 const {
   registerBatchOnChain,
   mintInventoryCertificateOnChain,
@@ -13,6 +14,7 @@ const {
   logLifecycleEventOnChain,
   updateBatchStatusOnChain,
   extractHash,
+  assertBatchCreationReady,
 } = require("../services/blockchainService");
 
 function computeYield(quantity, materialQuantity) {
@@ -181,7 +183,7 @@ exports.produceVaccine = async (req, res) => {
       quantity: req.body.quantity || 0,
     });
 
-    await Batch.updateOne(
+    const batchUpdate = await Batch.updateOne(
       { batchId: req.body.batchId },
       {
         $set: {
@@ -195,7 +197,7 @@ exports.produceVaccine = async (req, res) => {
     prod.txHash = extractHash(lifecycleReceipt);
     await prod.save();
 
-    if (req.body.batchId) {
+    if (req.body.batchId && batchUpdate.matchedCount > 0) {
       await updateBatchStatusOnChain(req.body.batchId, "Production Complete");
     }
 
@@ -217,6 +219,7 @@ exports.createBatch = async (req, res) => {
         vaccineType,
         quantity,
         manufacturer: req.body.manufacturer || "Manufacturer",
+        expiresAt: req.body.expiresAt,
         txHash: "",
         status: "Awaiting Multi-Sign Release",
         releaseStage: "Awaiting Production Sign-Off",
@@ -231,7 +234,7 @@ exports.createBatch = async (req, res) => {
       await batch.save();
     }
 
-    // blockchain write (mock-safe if ABI missing)
+    // Explicit local-chain write; no fabricated success receipt.
     let txHash = "";
     try {
       const receipt = await registerBatchOnChain(batchId, vaccineType, quantity);
@@ -328,7 +331,19 @@ exports.createBatchReport = async (req, res) => {
 
 // DFD combined flow: Receive Raw Materials -> Produce Vaccine -> Create Batch -> Create Report
 exports.runManufacturerWorkflow = async (req, res) => {
+  let workflowStarted = false;
   try {
+    const { error, value } = validateManufacturingInput(req.body);
+    if (error) return res.status(400).json({ error: error.details.map(detail => detail.message).join("; "), code: "INVALID_MANUFACTURING_INPUT" });
+    req.body = value;
+    const priorRecords = await Promise.all([
+      RawMaterial.exists({ batchId: value.batchId }), Production.exists({ batchId: value.batchId }),
+      BatchReport.exists({ batchId: value.batchId }),
+    ]);
+    if (priorRecords.some(Boolean)) return res.status(409).json({ code: "MANUFACTURING_INCOMPLETE", batchId: value.batchId,
+      error: "Manufacturing records already exist for this ID. Inspect the existing workflow before recovery; do not resubmit it or change the ID to bypass this check." });
+    // Read-only preflight: no operational documents are written for an unavailable chain.
+    await assertBatchCreationReady(value.batchId);
     const {
       batchId,
       vaccineType,
@@ -341,6 +356,7 @@ exports.runManufacturerWorkflow = async (req, res) => {
       remarks = "Auto-generated report",
     } = req.body;
 
+    workflowStarted = true;
     const rawMaterial = await RawMaterial.create({
       batchId,
       supplier,
@@ -395,17 +411,13 @@ exports.runManufacturerWorkflow = async (req, res) => {
         quantity,
         manufacturer,
         status: "Batch Created",
+        expiresAt: req.body.expiresAt,
         productionStatus: "Produced",
       });
     }
 
-    let txHash = "";
-    try {
-      const receipt = await registerBatchOnChain(batchId, vaccineType, quantity);
-      txHash = extractHash(receipt);
-    } catch (chainErr) {
-      console.warn("Manufacturer workflow blockchain skipped:", chainErr.message);
-    }
+    const registrationReceipt = await registerBatchOnChain(batchId, vaccineType, quantity);
+    const txHash = extractHash(registrationReceipt);
 
     const batchReceipt = await logLifecycleEventOnChain({
       batchId,
@@ -431,11 +443,11 @@ exports.runManufacturerWorkflow = async (req, res) => {
     });
 
     batch.baselineDemandForecast = minting.predictedDemand;
-    batch.certificateMinted = true;
+    batch.certificateMinted = Boolean(minting.certificateTxHash);
     batch.certificateId = minting.certificateId;
     batch.certificateUri = minting.certificateUri;
     batch.certificateTxHash = minting.certificateTxHash;
-    batch.certificateMintedAt = minting.certificate.issuedAt;
+    batch.certificateMintedAt = batch.certificateMinted ? minting.certificate.issuedAt : undefined;
     batch.releaseVisibleToExternal = false;
     await batch.save();
     await updateBatchStatusOnChain(batchId, batch.status);
@@ -487,9 +499,16 @@ exports.runManufacturerWorkflow = async (req, res) => {
       report,
       certificate: minting.certificate,
       txHash,
+      warnings: minting.certificateTxHash ? [] : ["The batch was created, but its inventory certificate has no confirmed blockchain transaction."],
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({
+      error: workflowStarted
+        ? "Manufacturing stopped before completion. Some records or transactions may already be saved. Inspect this batch before recovery; do not resubmit or change its ID to bypass the existing records."
+        : err.message,
+      code: workflowStarted ? "MANUFACTURING_INCOMPLETE" : (err.code || "MANUFACTURING_UNAVAILABLE"),
+      batchId: req.body?.batchId,
+    });
   }
 };
 
@@ -558,11 +577,11 @@ exports.signBatchRelease = async (req, res) => {
 // List batches with reports (for Admin/Monitoring)
 exports.getBatchDetails = async (_req, res) => {
   try {
-    const rawMaterials = await RawMaterial.find().sort({ receivedAt: -1 }).lean();
-    const productions = await Production.find().sort({ producedAt: -1 }).lean();
-    const batches = await Batch.find().sort({ createdAt: -1 }).lean();
-    const reports = await BatchReport.find().sort({ createdAt: -1 }).lean();
-    const certificates = await InventoryCertificate.find().sort({ issuedAt: -1 }).lean();
+    const rawMaterials = await RawMaterial.find(_req.scope.relatedBatch).sort({ receivedAt: -1 }).lean();
+    const productions = await Production.find(_req.scope.relatedBatch).sort({ producedAt: -1 }).lean();
+    const batches = await Batch.find(_req.scope.batch).sort({ createdAt: -1 }).lean();
+    const reports = await BatchReport.find(_req.scope.relatedBatch).sort({ createdAt: -1 }).lean();
+    const certificates = await InventoryCertificate.find(_req.scope.relatedBatch).sort({ issuedAt: -1 }).lean();
     res.json({ rawMaterials, productions, batches, reports, certificates });
   } catch (err) {
     res.status(500).json({ error: err.message });

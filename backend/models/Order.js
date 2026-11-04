@@ -14,6 +14,12 @@ const orderSchema = new mongoose.Schema(
       index: true,
     },
     hospital: String,
+    // auditBatchId remains a historical order reference, never a physical batch ID.
+    allocatedBatchId: String,
+    shipmentId: String,
+    distributor: String,
+    // Historical demand owner, not an assertion of physical batch allocation.
+    manufacturer: String,
     centerId: String,
     region: String,
     vaccineType: String,
@@ -23,6 +29,9 @@ const orderSchema = new mongoose.Schema(
       default: "Normal",
     },
     notes: String,
+    source: { type: String, enum: ["simulator", "manual", "csv"], default: "simulator" },
+    enteredBy: String,
+    note: String,
     status: {
       type: String,
       default: "Pending",
@@ -64,4 +73,5 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+require("./demoFields")(orderSchema);
 module.exports = mongoose.model("Order", orderSchema);

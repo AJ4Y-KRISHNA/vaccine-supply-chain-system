@@ -1,4 +1,3 @@
-console.log("PRIVATE KEY:", process.env.PRIVATE_KEY);
 const { ethers } = require("ethers");
 require("dotenv").config();
 

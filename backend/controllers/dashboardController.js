@@ -264,8 +264,8 @@ async function buildManufacturerHeatmapData(orders) {
 
 exports.getDistributorDashboard = async (_req, res) => {
   try {
-    const shipments = await Shipment.find().sort({ createdAt: -1 }).lean();
-    const temperatureLogs = await TemperatureLog.find().sort({ recordedAt: -1 }).limit(10).lean();
+    const shipments = await Shipment.find(_req.scope.shipment).sort({ createdAt: -1 }).lean();
+    const temperatureLogs = await TemperatureLog.find(_req.scope.telemetry).sort({ recordedAt: -1 }).limit(10).lean();
 
     const inTransit = shipments.filter((s) => s.status?.toLowerCase().includes("transit")).length;
     const delivered = shipments.filter((s) => {
@@ -277,6 +277,7 @@ exports.getDistributorDashboard = async (_req, res) => {
     const deliveryHistory = buildShipmentActivitySeries(shipments);
 
     res.json({
+      identity: { distributor: _req.user?.distributor || _req.user?.email || "" },
       totals: {
         totalShipments: shipments.length,
         inTransit,
@@ -315,18 +316,19 @@ exports.getDistributorDashboard = async (_req, res) => {
 
 exports.getManufacturerDashboard = async (_req, res) => {
   try {
-    const batches = await Batch.find().sort({ createdAt: -1 }).lean();
-    const productions = await Production.find().sort({ producedAt: -1 }).lean();
-    const rawMaterials = await RawMaterial.find().sort({ receivedAt: -1 }).lean();
-    const reports = await BatchReport.find().sort({ createdAt: -1 }).lean();
-    const certificates = await InventoryCertificate.find().sort({ issuedAt: -1 }).lean();
-    const orders = await Order.find({ status: { $in: ["Pending", "Approved"] } }).sort({ createdAt: -1 }).lean();
+    const batches = await Batch.find(_req.scope.batch).sort({ createdAt: -1 }).lean();
+    const productions = await Production.find(_req.scope.relatedBatch).sort({ producedAt: -1 }).lean();
+    const rawMaterials = await RawMaterial.find(_req.scope.relatedBatch).sort({ receivedAt: -1 }).lean();
+    const reports = await BatchReport.find(_req.scope.relatedBatch).sort({ createdAt: -1 }).lean();
+    const certificates = await InventoryCertificate.find(_req.scope.relatedBatch).sort({ issuedAt: -1 }).lean();
+    const orders = await Order.find({ $and: [_req.scope.order, { status: { $in: ["Pending", "Approved"] } }] }).sort({ createdAt: -1 }).lean();
     const heatmap = await buildManufacturerHeatmapData(orders);
 
     const totalQuantity = batches.reduce((sum, batch) => sum + (batch.quantity || 0), 0);
     const pendingShipments = batches.filter((batch) => !batch.releaseVisibleToExternal).length;
 
     res.json({
+      identity: { manufacturer: _req.user?.manufacturer || _req.user?.email || "" },
       cards: {
         totalBatches: batches.length,
         pendingShipments,
@@ -345,7 +347,9 @@ exports.getManufacturerDashboard = async (_req, res) => {
         batchId: batch.batchId,
         vaccineType: batch.vaccineType,
         quantity: batch.quantity,
+        expiresAt: batch.expiresAt,
         status: batch.status || "Manufactured",
+        coldChainStatus: batch.coldChainStatus || "",
         txHash: batch.txHash,
         baselineDemandForecast: batch.baselineDemandForecast || 0,
         certificateMinted: Boolean(batch.certificateMinted),
@@ -386,9 +390,10 @@ exports.getManufacturerDashboard = async (_req, res) => {
 
 exports.getHealthcareDashboard = async (_req, res) => {
   try {
-    const vaccinations = await Vaccination.find().sort({ date: -1 }).lean();
-    const shipments = await Shipment.find().sort({ lastUpdatedAt: -1 }).lean();
-    const dailyProgress = buildSevenDaySeries(vaccinations, "date", "dosesUsed");
+    const vaccinations = await Vaccination.find(_req.scope.vaccination).sort({ date: -1 }).lean();
+    const shipments = await Shipment.find(_req.scope.shipment).sort({ lastUpdatedAt: -1 }).lean();
+    const administrations = vaccinations.filter(entry => entry.workflowStage === "1.3 Administer Vaccines" || entry.eventType === "Vaccination" || entry.administrationStatus === "Administered");
+    const dailyProgress = buildSevenDaySeries(administrations, "date", "dosesUsed");
     const inventory = computeHealthcareInventory(vaccinations);
 
     res.json({
@@ -398,6 +403,7 @@ exports.getHealthcareDashboard = async (_req, res) => {
         vaccinatedToday: inventory.vaccinatedToday,
         lowAlerts: inventory.lowAlerts,
       },
+      identity: { hospital: _req.user?.hospital || _req.user?.email || "" },
       stockBreakdown: inventory.stockBreakdown,
       stockDetails: inventory.stockDetails,
       usageLogs: vaccinations.slice(0, 5),
@@ -425,7 +431,7 @@ exports.getHealthcareDashboard = async (_req, res) => {
           const status = String(shipment.status || "").toLowerCase();
           return (
             !shipment.hospitalConfirmed &&
-            (status.includes("supplied") || status.includes("delivered") || status.includes("new shipment required"))
+            (status.includes("supplied") || status.includes("delivered"))
           );
         })
         .slice(0, 8)
@@ -436,6 +442,7 @@ exports.getHealthcareDashboard = async (_req, res) => {
           quantity: shipment.quantity || 0,
           destination: shipment.destination || "Vaccination Center",
           status: shipment.status || "Pending",
+          coldChainStatus: shipment.coldChainStatus || "",
           txHash: shipment.txHash || "",
         })),
     });

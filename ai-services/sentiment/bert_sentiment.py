@@ -1,11 +1,15 @@
-from transformers import pipeline
+import os
 
 
 class MultilingualSentiment:
     def __init__(self):
         self.classifier = None
         self.model_available = False
+        # No model download during startup; opt in explicitly for the optional experiment.
+        if os.getenv("ENABLE_EXPERIMENTAL_BERT") != "true":
+            return
         try:
+            from transformers import pipeline
             self.classifier = pipeline(
                 "sentiment-analysis",
                 model="nlptown/bert-base-multilingual-uncased-sentiment"

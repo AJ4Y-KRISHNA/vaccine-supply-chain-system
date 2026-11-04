@@ -1,4 +1,6 @@
 fastapi
+scipy>=1.13,<2
+statsmodels>=0.14,<0.15
 uvicorn
 pandas
 numpy

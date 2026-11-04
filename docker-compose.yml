@@ -1,0 +1,258 @@
+name: vaccine-supply-chain-demo
+
+services:
+  mongo:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MONGO_HOST_PORT:-27017}:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "mongodb://127.0.0.1:27017/admin", "--eval", "try { if (!rs.status().ok) quit(1); } catch(e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}); quit(1); } if (!db.hello().isWritablePrimary) quit(1);"]
+      interval: 10s
+      timeout: 30s
+      retries: 20
+      start_period: 30s
+
+  mosquitto:
+    build:
+      context: ./mosquitto
+    restart: unless-stopped
+    environment:
+      MQTT_USERNAME: ${MQTT_USERNAME:?Copy .env.example to .env and set MQTT_USERNAME}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?Copy .env.example to .env and set MQTT_PASSWORD}
+    ports:
+      - "127.0.0.1:${MQTT_HOST_PORT:-1883}:1883"
+    volumes:
+      - mosquitto-data:/mosquitto/data
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_pub -h 127.0.0.1 -p 1883 -u \"$$MQTT_USERNAME\" -P \"$$MQTT_PASSWORD\" -t vaccine/healthcheck -m ok -q 1"]
+      interval: 5s
+      timeout: 4s
+      retries: 15
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Copy .env.example to .env and set REDIS_PASSWORD}
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+  hardhat:
+    build:
+      context: ./blockchain
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${HARDHAT_HOST_PORT:-8545}:8545"
+    volumes:
+      - blockchain-artifacts:/shared-artifacts
+    healthcheck:
+      test: ["CMD", "node", "-e", "Promise.all([{method:'eth_chainId',params:[]},{method:'eth_getCode',params:['0x5FbDB2315678afecb367f032d93F642f64180aa3','latest']}].map((x,id)=>fetch('http://127.0.0.1:8545',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id, ...x})}).then(r=>r.json()))).then(([chain,code])=>{if(chain.result!=='0x7a69'||!code.result||code.result==='0x')process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 30s
+
+  ai-service:
+    build:
+      context: ./ai-services
+    restart: unless-stopped
+    environment:
+      ENABLE_EXPERIMENTAL_BERT: "false"
+      SYNTHETIC_DEMO_MODE: "true"
+      MAX_SPEED_KMH: ${MAX_SPEED_KMH:-120}
+    ports:
+      - "127.0.0.1:${AI_HOST_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=2).read()"]
+      interval: 10s
+      timeout: 4s
+      retries: 15
+      start_period: 15s
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment: &backend-environment
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: 5000
+      DOCKER_COMPOSE: "true"
+      MONGO_URI: mongodb://mongo:27017/vaccine_supply_chain?replicaSet=rs0
+      EVENT_BACKBONE_ENABLED: "true"
+      EVENT_STREAM_PREFIX: vaccine:synthetic
+      TELEMETRY_RETENTION_SECONDS: "7776000"
+      JWT_SECRET: ${JWT_SECRET:?Copy .env.example to .env and set JWT_SECRET}
+      REFRESH_SECRET: ${REFRESH_SECRET:?Copy .env.example to .env and set REFRESH_SECRET}
+      TEMP_API_KEY: ${TEMP_API_KEY:?Copy .env.example to .env and set TEMP_API_KEY}
+      DEMO_SEED_PASSWORD: ${DEMO_SEED_PASSWORD:?Copy .env.example to .env and set DEMO_SEED_PASSWORD}
+      CORS_ORIGINS: http://localhost:${FRONTEND_HOST_PORT:-3000},http://127.0.0.1:${FRONTEND_HOST_PORT:-3000},http://localhost:5173,http://127.0.0.1:5173
+      FIELD_OPERATOR_WS_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      RPC_URL: http://hardhat:8545
+      CONTRACT_ADDRESS: 0x5FbDB2315678afecb367f032d93F642f64180aa3
+      MERKLE_CONTRACT_ADDRESS: ${MERKLE_CONTRACT_ADDRESS:-0x5FbDB2315678afecb367f032d93F642f64180aa3}
+      TELEMETRY_ANCHOR_MODE: merkle
+      MERKLE_WINDOW_SECONDS: ${MERKLE_WINDOW_SECONDS:-30}
+      LOCAL_CHAIN_DEMO: "true"
+      AUDIT_ANCHOR_ENABLED: "true"
+      AUDIT_ANCHOR_POLL_INTERVAL_MS: "3000"
+      AI_BASE_URL: http://ai-service:8000
+      ANALYTICS_METRICS_DIR: /workspace/backend/data/analytics
+      MQTT_URL: mqtt://mosquitto:1883
+      MQTT_USERNAME: ${MQTT_USERNAME:?Set MQTT_USERNAME}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?Set MQTT_PASSWORD}
+      MQTT_TELEMETRY_SUBSCRIBER_ENABLED: "false"
+      MQTT_TOPIC_PREFIX: vaccine/telemetry
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+      DOCKER_INTERNAL_HOSTS: mongo,mosquitto,redis,hardhat,ai-service,backend,edge-gateway
+      ALERT_EMAIL_ENABLED: "true"
+      ALERT_EMAIL_TRANSPORT: ethereal
+      ALERT_EMAIL_APP_URL: http://localhost:${FRONTEND_HOST_PORT:-3000}
+      SIMULATOR_TRANSPORT: mqtt
+      DATA_MODE: ${DATA_MODE:-mixed}
+      SIMULATOR_HTTP_FALLBACK: "true"
+      SIMULATOR_SCENARIO: ${SIMULATOR_SCENARIO:-NORMAL}
+      SIMULATOR_SEED: ${SIMULATOR_SEED:-1}
+      SIMULATOR_INGEST_URL: http://edge-gateway:5100/ingest
+      SIMULATOR_INGEST_API_KEY: ${EDGE_GATEWAY_API_KEY:?Set EDGE_GATEWAY_API_KEY}
+      EDGE_GATEWAY_DEVICE_SECRET: ${EDGE_GATEWAY_DEVICE_SECRET:?Set EDGE_GATEWAY_DEVICE_SECRET}
+      WORKER_MODE: external
+    ports:
+      - "127.0.0.1:${BACKEND_HOST_PORT:-5000}:5000"
+    volumes:
+      - blockchain-artifacts:/workspace/blockchain/artifacts:ro
+      - analytics-artifacts:/workspace/backend/data/analytics
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      hardhat:
+        condition: service_started
+      ai-service:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+      start_period: 20s
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["node", "worker.js"]
+    restart: unless-stopped
+    environment: *backend-environment
+    volumes:
+      - blockchain-artifacts:/workspace/blockchain/artifacts:ro
+      - analytics-artifacts:/workspace/backend/data/analytics
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  edge-gateway:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["node", "edge-gateway/server.js"]
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      DOCKER_COMPOSE: "true"
+      DOCKER_INTERNAL_HOSTS: mongo,mosquitto,redis,hardhat,ai-service,backend,edge-gateway
+      EDGE_GATEWAY_HOST: 0.0.0.0
+      EDGE_GATEWAY_PORT: 5100
+      EDGE_GATEWAY_API_KEY: ${EDGE_GATEWAY_API_KEY:?Set EDGE_GATEWAY_API_KEY}
+      EDGE_GATEWAY_DEVICE_SECRET: ${EDGE_GATEWAY_DEVICE_SECRET:?Set EDGE_GATEWAY_DEVICE_SECRET}
+      EDGE_GATEWAY_UPSTREAM_API_KEY: ${TEMP_API_KEY:?Set TEMP_API_KEY}
+      EDGE_GATEWAY_UPSTREAM_URL: http://backend:5000/api/temperature/ingest
+      MONGO_URI: mongodb://mongo:27017/vaccine_supply_chain
+      EDGE_GATEWAY_HEARTBEAT_MS: ${EDGE_GATEWAY_HEARTBEAT_MS:-30000}
+      EDGE_GATEWAY_FLUSH_INTERVAL_MS: ${EDGE_GATEWAY_FLUSH_INTERVAL_MS:-3000}
+      EDGE_MIN_TEMPERATURE: ${EDGE_MIN_TEMPERATURE:-2}
+      MAX_SPEED_KMH: ${MAX_SPEED_KMH:-120}
+      EDGE_MAX_TEMPERATURE: ${EDGE_MAX_TEMPERATURE:-8}
+      EDGE_GATEWAY_MQTT_ENABLED: "true"
+      MQTT_URL: mqtt://mosquitto:1883
+      MQTT_USERNAME: ${MQTT_USERNAME:?Set MQTT_USERNAME}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?Set MQTT_PASSWORD}
+      MQTT_TOPIC_PREFIX: vaccine/telemetry
+    depends_on:
+      mongo:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5100/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FRONTEND_HOST_PORT:-3000}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+      edge-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  field-operator-panel:
+    build:
+      context: .
+      dockerfile: field-operator-panel/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FIELD_PANEL_HOST_PORT:-5173}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  mongo-data:
+  mosquitto-data:
+  redis-data:
+  blockchain-artifacts:
+  analytics-artifacts:

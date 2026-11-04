@@ -1,0 +1,20 @@
+services:
+  mosquitto:
+    build:
+      context: ./mosquitto
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1883:1883"
+    environment:
+      MQTT_USERNAME: ${MQTT_USERNAME:?Copy .env.example to .env and set MQTT_USERNAME}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?Copy .env.example to .env and set MQTT_PASSWORD}
+    volumes:
+      - mosquitto-data:/mosquitto/data
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_pub -h 127.0.0.1 -u \"$$MQTT_USERNAME\" -P \"$$MQTT_PASSWORD\" -t vaccine/healthcheck -m ok -q 1"]
+      interval: 5s
+      timeout: 4s
+      retries: 15
+
+volumes:
+  mosquitto-data:

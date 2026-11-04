@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Doughnut, Line } from "react-chartjs-2";
 import {
@@ -13,13 +13,13 @@ import {
 } from "chart.js";
 import {
   AlertTriangle,
+  Activity,
   CheckCircle2,
   Bell,
   Brain,
   Database,
   Home,
   Link2,
-  LogOut,
   MapPinned,
   MessageSquareText,
   Package2,
@@ -34,6 +34,20 @@ import {
 import BlockchainLog from "../components/BlockchainLog";
 import { useToast } from "../components/Toast";
 import SentimentFeedbackPanel from "../components/Admin/SentimentFeedbackPanel";
+import TemperatureAlertPanel from "../components/TemperatureAlertPanel";
+import SimulatorPanel from "../components/SimulatorPanel";
+import LiveShipmentVisualizer from "../components/LiveShipmentVisualizer";
+import TraceabilityPanel from "../components/TraceabilityPanel";
+import GuidedDemoPanel from "../components/GuidedDemoPanel";
+import SystemReadinessPanel from "../components/SystemReadinessPanel";
+import ReviewerPermissionsPanel from "../components/ReviewerPermissionsPanel";
+import SupplyPlannerPanel from "../components/Admin/SupplyPlannerPanel";
+import ForecastAnalyticsPanel from "../components/ForecastAnalyticsPanel";
+import ForecastExplanation from "../components/ForecastExplanation";
+import StatusBadge from "../components/StatusBadge";
+import OrderAllocationFields from "../components/Admin/OrderAllocationFields";
+import { LogoutButton } from "../components/SessionControls";
+import { manualSimulatorConsoleEnabled } from "../config/features";
 import {
   fetchAdminMonitoring,
   fetchAdminOrders,
@@ -43,6 +57,9 @@ import {
   reviewAdminOrder,
   runAdminSentiment,
 } from "../services/workflow";
+
+import BatchDispositionBadge from "../components/BatchDispositionBadge";
+import ManualReadingEntry from "../components/ManualReadingEntry";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, ArcElement, Tooltip, Legend);
 
@@ -84,7 +101,7 @@ function formatDateTime(value) {
 }
 
 function goTo(sectionId) {
-  document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  document.getElementById(sectionId)?.scrollIntoView?.({ behavior: "smooth", block: "start" });
 }
 
 function canFocusBatch(batchId) {
@@ -93,27 +110,6 @@ function canFocusBatch(batchId) {
 
 function isActiveBatch(batchId, selectedBatchId) {
   return canFocusBatch(batchId) && batchId === selectedBatchId;
-}
-
-function getStatusTone(status) {
-  const value = String(status || "").toLowerCase();
-  if (value.includes("alert") || value.includes("high") || value.includes("critical")) {
-    return "bg-[#fff0f0] text-[#d85a5a]";
-  }
-  if (
-    value.includes("active") ||
-    value.includes("verified") ||
-    value.includes("delivered") ||
-    value.includes("supplied") ||
-    value.includes("stable") ||
-    value.includes("normal")
-  ) {
-    return "bg-[#e8f7ef] text-[#2ea67f]";
-  }
-  if (value.includes("pending") || value.includes("transit") || value.includes("monitor")) {
-    return "bg-[#fff7e8] text-[#c97d2c]";
-  }
-  return "bg-[#eef5ff] text-[#3278d7]";
 }
 
 function MetricCard({ icon: Icon, label, value, accent, badge }) {
@@ -164,23 +160,32 @@ const AdminDashboard = () => {
   const [selectedAuditBatchId, setSelectedAuditBatchId] = useState("");
   const [adminOrders, setAdminOrders] = useState([]);
   const [decisionNotes, setDecisionNotes] = useState({});
+  const [allocations, setAllocations] = useState({});
+  const [allocationOptions, setAllocationOptions] = useState([]);
+  const [distributorOptions, setDistributorOptions] = useState([]);
+  const [reviewingOrder, setReviewingOrder] = useState("");
   const [loadingPage, setLoadingPage] = useState(true);
   const [loadingSentiment, setLoadingSentiment] = useState(false);
+  const [sectionErrors, setSectionErrors] = useState({});
+  const [extraAuditIds, setExtraAuditIds] = useState([]);
+  const sentimentInFlight = useRef(false);
+  const reviewInFlight = useRef(false);
   const [loading, setLoading] = useState({ users: false, monitoring: false, reports: false, workflow: false, orders: false });
   const { addToast } = useToast();
 
   const setLoadingKey = (key, value) => setLoading((prev) => ({ ...prev, [key]: value }));
+  const setSectionError = (key, value) => setSectionErrors((prev) => ({ ...prev, [key]: value }));
 
   const loadUsers = async (silent = false) => {
     try {
       setLoadingKey("users", true);
+      setSectionError("users", "");
       const response = await fetchAdminUsers();
       const nextUsers = Array.isArray(response) ? response : response?.users || [];
       setUsers(nextUsers);
       setUserTotal(response?.total || nextUsers.length);
     } catch (_error) {
-      setUsers([]);
-      setUserTotal(0);
+      setSectionError("users", "User directory could not be refreshed. Previously loaded records, if any, remain visible.");
       if (!silent) addToast("error", "User management data failed to load");
     } finally {
       setLoadingKey("users", false);
@@ -190,9 +195,10 @@ const AdminDashboard = () => {
   const loadMonitoring = async (silent = false) => {
     try {
       setLoadingKey("monitoring", true);
+      setSectionError("monitoring", "");
       setMonitoring((await fetchAdminMonitoring()) || EMPTY_MONITORING);
     } catch (_error) {
-      setMonitoring(EMPTY_MONITORING);
+      setSectionError("monitoring", "Monitoring could not be refreshed. Do not interpret an empty or stale feed as healthy telemetry.");
       if (!silent) addToast("error", "Monitoring data failed to load");
     } finally {
       setLoadingKey("monitoring", false);
@@ -202,9 +208,10 @@ const AdminDashboard = () => {
   const loadReports = async (silent = false) => {
     try {
       setLoadingKey("reports", true);
+      setSectionError("reports", "");
       setReports((await fetchAdminReports()) || EMPTY_REPORTS);
     } catch (_error) {
-      setReports(EMPTY_REPORTS);
+      setSectionError("reports", "Reports could not be refreshed. Previously loaded results may be stale.");
       if (!silent) addToast("error", "Reports data failed to load");
     } finally {
       setLoadingKey("reports", false);
@@ -214,10 +221,11 @@ const AdminDashboard = () => {
   const loadWorkflow = async (silent = false) => {
     try {
       setLoadingKey("workflow", true);
+      setSectionError("workflow", "");
       const response = await fetchAdminWorkflow();
       setWorkflow(response?.workflow || []);
     } catch (_error) {
-      setWorkflow([]);
+      setSectionError("workflow", "Workflow status could not be refreshed.");
       if (!silent) addToast("error", "Workflow data failed to load");
     } finally {
       setLoadingKey("workflow", false);
@@ -227,10 +235,13 @@ const AdminDashboard = () => {
   const loadOrders = async (silent = false) => {
     try {
       setLoadingKey("orders", true);
+      setSectionError("orders", "");
       const response = await fetchAdminOrders();
       setAdminOrders(response?.orders || []);
+      setAllocationOptions(response?.allocationOptions || []);
+      setDistributorOptions(response?.distributors || []);
     } catch (_error) {
-      setAdminOrders([]);
+      setSectionError("orders", "Order queue could not be refreshed. Refresh successfully before making a decision.");
       if (!silent) addToast("error", "Order queue failed to load");
     } finally {
       setLoadingKey("orders", false);
@@ -250,45 +261,47 @@ const AdminDashboard = () => {
   }, []);
 
   const runSentiment = async () => {
+    if (sentimentInFlight.current) return;
+    if (!sentimentText.trim()) {
+      addToast("error", "Enter text to analyze first.");
+      return;
+    }
+    sentimentInFlight.current = true;
     try {
       setLoadingSentiment(true);
-      const result = await runAdminSentiment(sentimentText);
+      const result = await runAdminSentiment(sentimentText.trim());
       setSentiment(result || { sentiment: { sentiment: "Neutral", score: 0 } });
       addToast("success", "Sentiment analysis updated");
       await Promise.allSettled([loadMonitoring(true), loadReports(true), loadWorkflow(true)]);
-    } catch (_error) {
-      addToast("error", "Sentiment analysis failed");
+    } catch (error) {
+      addToast("error", error.response?.data?.error || "Sentiment analysis failed. Check the AI service and local blockchain.");
     } finally {
+      sentimentInFlight.current = false;
       setLoadingSentiment(false);
     }
   };
 
   const reviewOrderDecision = async (orderId, decision) => {
+    if (reviewInFlight.current || sectionErrors.orders) return;
+    reviewInFlight.current = true;
     try {
+      setReviewingOrder(orderId);
       await reviewAdminOrder(orderId, {
         decision,
         note: decisionNotes[orderId] || "",
+        ...(allocations[orderId] || {}),
       });
       addToast("success", `Order ${decision.toLowerCase()}d successfully`);
       await Promise.allSettled([loadOrders(true), loadMonitoring(true), loadReports(true), loadWorkflow(true)]);
-    } catch (_error) {
-      addToast("error", `Unable to ${decision.toLowerCase()} order`);
+    } catch (error) {
+      addToast("error", error.response?.data?.error || `Unable to ${decision.toLowerCase()} order`);
+    } finally {
+      reviewInFlight.current = false;
+      setReviewingOrder("");
     }
   };
 
   const summary = monitoring?.summary || EMPTY_MONITORING.summary;
-  const alerts = useMemo(
-    () =>
-      (monitoring?.temperatureLogs || [])
-        .filter((item) => item.status === "Alert")
-        .slice(0, 4)
-        .map((item) => ({
-          title: `Temperature alert for ${item.batchId}`,
-          time: formatDateTime(item.recordedAt),
-        })),
-    [monitoring]
-  );
-
   const alertRows = useMemo(() => {
     const logs = (monitoring?.temperatureLogs || []).map((item) => ({
       id: item._id,
@@ -302,7 +315,7 @@ const AdminDashboard = () => {
       return logs.filter((item) => String(item.status).toLowerCase() === "alert");
     }
     if (alertFilter === "stable") {
-      return logs.filter((item) => String(item.status).toLowerCase() !== "alert");
+      return logs.filter((item) => String(item.status).toLowerCase() === "normal");
     }
     return logs;
   }, [alertFilter, monitoring]);
@@ -315,7 +328,8 @@ const AdminDashboard = () => {
           id: item._id || item.batchId,
           title: item.batchId || "--",
           subtitle: item.vaccineType || "Vaccine batch",
-          status: item.status || "Created",
+          status: item.coldChainStatus || item.status || "Created",
+          disposition: item.disposition,
           meta: formatDateTime(item.createdAt),
           txHash: item.txHash,
         })),
@@ -326,7 +340,7 @@ const AdminDashboard = () => {
           id: item._id || item.batchId,
           title: item.batchId || "--",
           subtitle: item.destination || item.currentLocation || "Shipment route",
-          status: item.status || "Pending",
+          status: item.coldChainStatus || item.status || "Pending",
           meta: formatDateTime(item.lastUpdatedAt || item.createdAt),
           txHash: item.txHash,
         })),
@@ -410,13 +424,13 @@ const AdminDashboard = () => {
       }));
 
   const forecastData = {
-    labels: reportSeries.length ? reportSeries.map((item) => item.label) : ["Forecast"],
+    labels: reportSeries.length ? reportSeries.map((item) => item.label) : ["Forecast estimate"],
     datasets: [
       {
-        label: "Demand Forecast",
+        label: reports?.reportSeries?.length ? "Recorded vaccination doses" : "Advisory demand estimate",
         data: reportSeries.length ? reportSeries.map((item) => Number(item.value || 0)) : [Number(reports?.forecast?.predicted_demand || 0)],
-        borderColor: "#5d9bf0",
-        backgroundColor: "rgba(93, 155, 240, 0.15)",
+        borderColor: "#438f66",
+        backgroundColor: "rgba(67, 143, 102, 0.15)",
         fill: true,
         tension: 0.35,
         pointRadius: 4,
@@ -445,13 +459,17 @@ const AdminDashboard = () => {
   const auditBatchIds = useMemo(() => {
     const ids = [
       ...adminOrders.map((item) => item.auditBatchId),
+      ...adminOrders.map((item) => item.allocatedBatchId),
+      ...extraAuditIds,
+      ...(monitoring?.temperatureLogs || []).map((item) => item.batchId),
+      ...(reports?.insights || []).map((item) => item.batchId),
       ...(monitoring?.batches || []).map((item) => item.batchId),
       ...(monitoring?.shipments || []).map((item) => item.batchId),
       ...(monitoring?.distributions || []).map((item) => item.batchId),
       ...(monitoring?.vaccinations || []).map((item) => item.batchId),
     ].filter(Boolean);
     return Array.from(new Set(ids));
-  }, [adminOrders, monitoring]);
+  }, [adminOrders, monitoring, reports, extraAuditIds]);
 
   useEffect(() => {
     if (!auditBatchIds.length) {
@@ -465,45 +483,48 @@ const AdminDashboard = () => {
   }, [auditBatchIds, selectedAuditBatchId]);
 
   const focusAuditBatch = (batchId) => {
-    if (!batchId) return;
+    if (!canFocusBatch(batchId)) return;
+    setExtraAuditIds((prev) => prev.includes(batchId) ? prev : [...prev, batchId]);
     setSelectedAuditBatchId(batchId);
-    document.getElementById("admin-blockchain-audit")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    goTo("admin-blockchain-audit");
   };
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,#eef4fb_0%,#f7fbff_38%,#f3f7fc_100%)] text-[#32435b]">
-      <header className="h-16 bg-gradient-to-r from-[#0c4d96] via-[#2376cb] to-[#3b95e6] px-6 text-white shadow-sm">
-        <div className="flex h-full items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/30 bg-white/15">
+    <div className="dashboard-page min-h-screen bg-[linear-gradient(180deg,#eef4fb_0%,#f7fbff_38%,#f3f7fc_100%)] text-[#32435b]">
+      <div className="mx-auto max-w-[1500px] px-5"><ManualReadingEntry /></div>
+      <header className="dashboard-header bg-gradient-to-r from-[#0c4d96] via-[#2376cb] to-[#3b95e6] px-6 text-white shadow-sm">
+        <div className="flex h-full flex-wrap items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/30 bg-white/15">
               <Shield size={20} />
             </div>
             <h1 className="text-[1.45rem] font-semibold tracking-wide">2026 Smart Vaccine Supply Chain System</h1>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="relative hidden md:block">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="relative hidden xl:block">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/70" size={16} />
               <input
                 className="w-60 rounded-full border border-white/20 bg-white/12 py-2 pl-9 pr-4 text-sm text-white placeholder-white/60 outline-none"
-                placeholder="Search admin data..."
+                aria-label="Search users from header"
+                placeholder="Search users or roles..."
                 value={userSearch}
                 onChange={(e) => setUserSearch(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && goTo("admin-users")}
               />
             </div>
-            <div className="relative">
+            <button type="button" aria-label="Open temperature alert queue" onClick={() => goTo("admin-cold-chain")} className="relative rounded-lg p-2 hover:bg-white/10">
               <Bell size={18} />
-              <span className="absolute -top-2 -right-2 flex h-4 w-4 items-center justify-center rounded-full bg-[#ff6d6d] text-[10px]">{alerts.length}</span>
-            </div>
+            </button>
             <div className="flex items-center gap-2 text-sm">
-              <span>Admin</span>
+              <span className="max-w-[220px] truncate" title={sessionStorage.getItem("userEmail") || "Admin"}>{sessionStorage.getItem("userEmail") || "Admin"}</span>
               <UserCircle2 size={24} />
             </div>
           </div>
         </div>
       </header>
 
-      <div className="flex">
-        <aside className="min-h-[calc(100vh-64px)] w-[120px] bg-gradient-to-b from-[#124e97] to-[#206eb9] text-white shadow-xl">
+      <div className="dashboard-layout flex">
+        <aside className="dashboard-sidebar bg-gradient-to-b from-[#124e97] to-[#206eb9] text-white shadow-xl">
           <nav className="space-y-2 px-3 pt-6 text-[13px]">
             <button type="button" onClick={() => goTo("admin-top")} className="flex w-full items-center gap-2 rounded-lg bg-white/12 px-3 py-3 text-left">
               <Home size={15} />
@@ -511,8 +532,11 @@ const AdminDashboard = () => {
             </button>
             <button type="button" onClick={() => goTo("admin-users")} className="flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left hover:bg-white/10">
               <Users size={15} />
-              <span>User Mgmt</span>
+              <span>User Directory</span>
             </button>
+            <button type="button" onClick={() => goTo("admin-demo-mode")} className="flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left hover:bg-white/10"><Activity size={15} /><span>Guided Demo</span></button>
+            <button type="button" onClick={() => goTo("admin-reviewers")} className="flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left hover:bg-white/10"><Shield size={15} /><span>Reviewer Access</span></button>
+            <button type="button" onClick={() => goTo("admin-readiness")} className="flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left hover:bg-white/10"><Database size={15} /><span>System Readiness</span></button>
             <button type="button" onClick={() => goTo("admin-monitoring")} className="flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left hover:bg-white/10">
               <Database size={15} />
               <span>Monitoring</span>
@@ -529,17 +553,26 @@ const AdminDashboard = () => {
               <MessageSquareText size={15} />
               <span>Sentiment</span>
             </button>
-            <Link to="/" className="flex items-center gap-2 rounded-lg px-3 py-3 hover:bg-white/10">
-              <LogOut size={15} />
-              <span>Logout</span>
-            </Link>
+            <button type="button" onClick={() => goTo("admin-orders")} className="flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left hover:bg-white/10"><Package2 size={15} /><span>Order Review</span></button>
+            <button type="button" onClick={() => goTo("admin-cold-chain")} className="flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left hover:bg-white/10"><Thermometer size={15} /><span>Cold Chain & IoT</span></button>
+            {manualSimulatorConsoleEnabled ? <Link to="/admin/manual-simulator" className="flex items-center gap-2 rounded-lg px-3 py-3 hover:bg-white/10"><Thermometer size={15} /><span>Manual Sensor Console</span></Link> : null}
+            <button type="button" onClick={() => goTo("admin-supply-plan")} className="flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left hover:bg-white/10"><Truck size={15} /><span>Supply Planning</span></button>
+            <button type="button" onClick={() => goTo("forecast-analytics")} className="flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left hover:bg-white/10"><Truck size={15} /><span>Forecast Analytics</span></button>
+            <button type="button" onClick={() => goTo("admin-blockchain-audit")} className="flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left hover:bg-white/10"><Link2 size={15} /><span>Blockchain Audit</span></button>
+            <Link to="/architecture" className="flex items-center gap-2 rounded-lg px-3 py-3 hover:bg-white/10"><Database size={15} /><span>Architecture Status</span></Link>
+            <LogoutButton className="flex w-full items-center gap-2 rounded-lg px-3 py-3 hover:bg-white/10" />
           </nav>
         </aside>
 
-        <main className="flex-1 px-5 py-5">
-          <div className="mx-auto max-w-[1240px]" id="admin-top">
+        <main className="dashboard-main min-w-0 flex-1 px-5 py-5">
+          <div className="dashboard-content mx-auto max-w-[1440px]" id="admin-top">
             <div className="mb-1 text-[12px] text-[#92a0b2]">Home / Dashboard</div>
             <h2 className="mb-5 text-[1.95rem] font-semibold text-[#2d4a73]">Admin Dashboard</h2>
+            {Object.values(sectionErrors).some(Boolean) && <div role="alert" className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <p className="font-semibold">Some dashboard data is unavailable</p>
+              <ul className="my-2 list-disc pl-5">{Object.entries(sectionErrors).filter(([, message]) => message).map(([key, message]) => <li key={key}>{message}</li>)}</ul>
+              <button type="button" onClick={loadPage} disabled={loadingPage} className="rounded-lg border border-amber-400 px-3 py-2 font-semibold disabled:opacity-50">Retry dashboard data</button>
+            </div>}
             <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
               <MetricCard icon={Package2} label="Batches" value={summary.batches} accent="text-[#2b68c6]" badge="bg-[#e8f1ff] text-[#2f7fd4]" />
               <MetricCard icon={Truck} label="Shipments" value={summary.shipments} accent="text-[#2ea67f]" badge="bg-[#e8fbf3] text-[#2ea67f]" />
@@ -547,14 +580,18 @@ const AdminDashboard = () => {
               <MetricCard icon={Thermometer} label="Temp Alerts" value={summary.tempAlerts} accent="text-[#de6666]" badge="bg-[#fff0f0] text-[#de6666]" />
             </div>
 
-            <div className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-[0.9fr_1.1fr_0.8fr]" id="admin-monitoring">
+            <div className="mb-6"><LiveShipmentVisualizer compact maxVisible={3} /></div>
+
+            <div className="mb-6"><GuidedDemoPanel /></div>
+
+            <div className="mb-6 grid grid-cols-1 gap-5 2xl:grid-cols-[0.9fr_1.1fr_0.8fr]" id="admin-monitoring">
               <div className="rounded-[14px] border border-[#e6eef8] bg-white p-5 shadow-sm">
                 <PanelHeader title="Admin Workflow" description="Live DFD step completion for the admin module." loading={loading.workflow} onRefresh={() => loadWorkflow()} />
                 <div className="space-y-3">
                   {workflow.map((step, index) => (
                     <div key={index} className="flex items-center justify-between rounded-xl border border-[#edf2f8] px-3 py-3">
                       <span className="text-sm text-[#42566f]">{step.step}</span>
-                      <span className="rounded-md bg-[#eef5ff] px-2.5 py-1 text-[11px] font-semibold text-[#3278d7]">{step.status}</span>
+                      <StatusBadge value={step.status} />
                     </div>
                   ))}
                   {!workflow.length && (
@@ -593,6 +630,7 @@ const AdminDashboard = () => {
                     <button
                       key={row.id}
                       type="button"
+                      disabled={!canFocusBatch(row.title)}
                       onClick={() => focusAuditBatch(row.title)}
                       className={`block w-full rounded-xl border px-3 py-3 text-left transition ${
                         isActiveBatch(row.title, selectedAuditBatchId)
@@ -605,9 +643,10 @@ const AdminDashboard = () => {
                           <div className="font-semibold text-[#42566f]">{row.title}</div>
                           <div className="mt-1 text-xs text-[#8192a7]">{row.subtitle}</div>
                         </div>
-                        <span className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${getStatusTone(row.status)}`}>
-                          {row.status}
-                        </span>
+                        <div className="flex flex-col items-end gap-2">
+                          <StatusBadge value={row.status} />
+                          {monitorView === "batches" ? <BatchDispositionBadge disposition={row.disposition} /> : null}
+                        </div>
                       </div>
                       <div className="mt-2 flex flex-wrap gap-3 text-[12px] text-[#60748f]">
                         <span>{row.meta}</span>
@@ -636,6 +675,7 @@ const AdminDashboard = () => {
                       <button
                         key={`${record.batchId}-mini-${index}`}
                         type="button"
+                        disabled={!canFocusBatch(record.batchId)}
                         onClick={() => canFocusBatch(record.batchId) && focusAuditBatch(record.batchId)}
                         className={`flex w-full items-center justify-between rounded-lg px-2 py-1 text-[12px] text-[#60748f] transition ${
                           isActiveBatch(record.batchId, selectedAuditBatchId)
@@ -668,17 +708,17 @@ const AdminDashboard = () => {
                 />
                 <div className="mb-4 grid grid-cols-2 gap-3">
                   <div className="rounded-xl bg-[#fff5f5] px-4 py-3">
-                    <div className="text-[11px] uppercase tracking-wide text-[#d18a8a]">Active Alerts</div>
+                    <div className="text-[11px] uppercase tracking-wide text-[#d18a8a]">Historical alert readings</div>
                     <div className="mt-1 flex items-center gap-2 text-xl font-bold text-[#d85a5a]">
                       <AlertTriangle size={18} />
                       {summary.tempAlerts}
                     </div>
                   </div>
                   <div className="rounded-xl bg-[#f4fbf7] px-4 py-3">
-                    <div className="text-[11px] uppercase tracking-wide text-[#7fb294]">Stable Logs</div>
+                    <div className="text-[11px] uppercase tracking-wide text-[#7fb294]">Normal recent readings</div>
                     <div className="mt-1 flex items-center gap-2 text-xl font-bold text-[#2ea67f]">
                       <CheckCircle2 size={18} />
-                      {Math.max((monitoring?.temperatureLogs || []).length - summary.tempAlerts, 0)}
+                      {(monitoring?.temperatureLogs || []).filter((item) => item.status === "Normal").length}
                     </div>
                   </div>
                 </div>
@@ -707,6 +747,7 @@ const AdminDashboard = () => {
                     <button
                       key={alert.id}
                       type="button"
+                      disabled={!canFocusBatch(alert.batchId)}
                       onClick={() => canFocusBatch(alert.batchId) && focusAuditBatch(alert.batchId)}
                       className={`block w-full rounded-xl border border-[#edf2f8] px-3 py-3 text-left transition ${
                         isActiveBatch(alert.batchId, selectedAuditBatchId)
@@ -728,9 +769,7 @@ const AdminDashboard = () => {
                           </div>
                           <div className="mt-1 text-xs text-[#8192a7]">{alert.time}</div>
                         </div>
-                        <span className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${getStatusTone(alert.status)}`}>
-                          {alert.status}
-                        </span>
+                        <StatusBadge value={alert.status} />
                       </div>
                       <div className="mt-2 text-[12px] text-[#60748f]">Reading: {alert.reading}</div>
                     </button>
@@ -744,10 +783,10 @@ const AdminDashboard = () => {
               </div>
             </div>
 
-            <div className="mb-4 rounded-[14px] border border-[#e4edf8] bg-white p-5 shadow-sm">
+            <div id="admin-orders" className="mb-4 rounded-[14px] border border-[#e4edf8] bg-white p-5 shadow-sm">
               <PanelHeader
                 title="Hospital Vaccine Orders"
-                description="Approve or decline hospital requests using AI risk flags and sentiment scores."
+                description="Allocate an existing released batch and mapped distributor. Forecast and sentiment are advisory only."
                 loading={loading.orders}
                 onRefresh={() => loadOrders()}
               />
@@ -756,7 +795,7 @@ const AdminDashboard = () => {
                   <div
                     key={order._id}
                     className={`rounded-xl border px-4 py-4 ${
-                      isActiveBatch(order.auditBatchId, selectedAuditBatchId)
+                      isActiveBatch(order.allocatedBatchId || order.auditBatchId, selectedAuditBatchId)
                         ? "border-[#2f8ae0] bg-[#eef6ff] ring-1 ring-[#bfdbfe]"
                         : "border-[#edf2f8] bg-white"
                     }`}
@@ -766,14 +805,13 @@ const AdminDashboard = () => {
                         <div className="flex flex-wrap items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => focusAuditBatch(order.auditBatchId)}
+                            disabled={!canFocusBatch(order.allocatedBatchId || order.auditBatchId)}
+                            onClick={() => focusAuditBatch(order.allocatedBatchId || order.auditBatchId)}
                             className="font-semibold text-[#42566f] hover:text-[#2f8ae0]"
                           >
                             {order.orderId}
                           </button>
-                          <span className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${getStatusTone(order.status)}`}>
-                            {order.status}
-                          </span>
+                          <StatusBadge value={order.status} />
                           <span className="rounded-md bg-[#f6f1ff] px-2.5 py-1 text-[11px] font-semibold text-[#8a58df]">
                             Risk {order.riskFlag}
                           </span>
@@ -792,9 +830,16 @@ const AdminDashboard = () => {
                           </div>
                         ) : null}
                       </div>
-                      <div className="w-full max-w-[360px] space-y-2">
+                      <div className="w-full space-y-2 xl:max-w-[360px]">
+                        <OrderAllocationFields order={order} options={allocationOptions} distributors={distributorOptions}
+                          busy={Boolean(reviewingOrder) || loading.orders || Boolean(sectionErrors.orders)}
+                          value={allocations[order.orderId] || { batchId: order.allocatedBatchId, distributor: order.distributor }}
+                          onChange={value => setAllocations(prev => ({ ...prev, [order.orderId]: value }))} />
                         <textarea
                           rows={2}
+                          aria-label={`Decision note for ${order.orderId}`}
+                          disabled={order.status !== "Pending" || Boolean(reviewingOrder)}
+                          maxLength={2000}
                           value={decisionNotes[order.orderId] || ""}
                           onChange={(e) =>
                             setDecisionNotes((prev) => ({ ...prev, [order.orderId]: e.target.value }))
@@ -806,7 +851,7 @@ const AdminDashboard = () => {
                           <button
                             type="button"
                             onClick={() => reviewOrderDecision(order.orderId, "Approve")}
-                            disabled={order.status !== "Pending"}
+                            disabled={order.status !== "Pending" || Boolean(reviewingOrder) || loading.orders || Boolean(sectionErrors.orders) || !allocationOptions.some((batch) => batch.batchId === allocations[order.orderId]?.batchId && batch.vaccineType === order.vaccineType && batch.eligible && batch.remainingDoses >= order.requestedDoses) || !distributorOptions.includes(allocations[order.orderId]?.distributor)}
                             className="flex-1 rounded-xl bg-[#2ea67f] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             Approve
@@ -814,7 +859,7 @@ const AdminDashboard = () => {
                           <button
                             type="button"
                             onClick={() => reviewOrderDecision(order.orderId, "Decline")}
-                            disabled={order.status !== "Pending"}
+                            disabled={order.status !== "Pending" || Boolean(reviewingOrder) || loading.orders || Boolean(sectionErrors.orders)}
                             className="flex-1 rounded-xl bg-[#e56b6b] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             Decline
@@ -837,11 +882,12 @@ const AdminDashboard = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr_0.95fr]">
+            <div className="grid grid-cols-1 gap-5 2xl:grid-cols-2">
               <div id="admin-users" className="rounded-[14px] border border-[#e4edf8] bg-white p-5 shadow-sm">
-                <PanelHeader title="User Management" description={`Manage ${userTotal} registered platform users.`} loading={loading.users} onRefresh={() => loadUsers()} />
+                <PanelHeader title="User Directory" description={`View ${userTotal} registered users. Account changes are not available in this read-only directory.`} loading={loading.users} onRefresh={() => loadUsers()} />
                 <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
                   <input
+                    aria-label="Search user or role"
                     value={userSearch}
                     onChange={(e) => setUserSearch(e.target.value)}
                     placeholder="Search user or role"
@@ -865,7 +911,7 @@ const AdminDashboard = () => {
                           <td className="py-2.5 font-medium">{user.email}</td>
                           <td className="py-2.5">{user.role}</td>
                           <td className="py-2.5">
-                            <span className="rounded-md bg-[#e8f7ef] px-2.5 py-1 text-[11px] font-semibold text-[#2ea67f]">{user.status}</span>
+                            <StatusBadge value={user.status} />
                           </td>
                           <td className="py-2.5 text-[#7f91a7]">{formatDateTime(user.lastActivityAt)}</td>
                         </tr>
@@ -883,7 +929,7 @@ const AdminDashboard = () => {
               </div>
 
               <div id="admin-reports" className="rounded-[14px] border border-[#e4edf8] bg-white p-5 shadow-sm">
-                <PanelHeader title="Reports & Insights" description="AI forecast trends and recent distribution decisions." loading={loading.reports} onRefresh={() => loadReports()} />
+                <PanelHeader title="Reports & Insights" description="Recorded vaccination history and advisory estimates; not validated demand predictions." loading={loading.reports} onRefresh={() => loadReports()} />
                 <div className="mb-4 grid grid-cols-3 gap-3">
                   <div className="rounded-xl bg-[#f7fbff] px-4 py-3">
                     <div className="text-[11px] uppercase tracking-wide text-[#8aa0ba]">Predicted</div>
@@ -912,11 +958,13 @@ const AdminDashboard = () => {
                     }}
                   />
                 </div>
+                <p className="mt-2 text-xs text-slate-600">{reports?.reportSeries?.length ? "Chart: recorded vaccination dose history, not a forecast." : "Chart: advisory estimates only; zero may indicate insufficient history."}</p>
                 <div className="mt-4 space-y-2">
                   {(reports?.insights || []).map((item, index) => (
                     <button
                       key={`${item.batchId}-${index}`}
                       type="button"
+                      disabled={!canFocusBatch(item.batchId)}
                       onClick={() => canFocusBatch(item.batchId) && focusAuditBatch(item.batchId)}
                       className={`block w-full rounded-xl border border-[#edf2f8] px-3 py-2.5 text-left text-sm transition ${
                         isActiveBatch(item.batchId, selectedAuditBatchId)
@@ -951,12 +999,14 @@ const AdminDashboard = () => {
                     </div>
                   )}
                 </div>
+                <ForecastExplanation forecast={reports?.forecast} loading={loading.reports || loadingPage} />
               </div>
 
               <div id="admin-sentiment" className="rounded-[14px] border border-[#e4edf8] bg-white p-5 shadow-sm">
                 <PanelHeader title="Sentiment Analysis" description="Run multilingual sentiment analysis and log it on-chain." loading={loadingSentiment} />
-                <textarea className="mb-3 w-full rounded-xl border border-[#dfe7f1] px-3 py-2.5 text-sm" rows={4} value={sentimentText} onChange={(e) => setSentimentText(e.target.value)} />
-                <button onClick={runSentiment} disabled={loadingSentiment} className="mb-4 w-full rounded-xl bg-[#2f8ae0] px-5 py-3 text-sm font-semibold text-white shadow-sm disabled:opacity-60">
+                <label htmlFor="admin-sentiment-text" className="mb-2 block text-sm font-medium">Text to analyze</label>
+                <textarea id="admin-sentiment-text" disabled={loadingSentiment} maxLength={10000} className="mb-3 w-full rounded-xl border border-[#dfe7f1] px-3 py-2.5 text-sm" rows={4} value={sentimentText} onChange={(e) => setSentimentText(e.target.value)} />
+                <button type="button" onClick={runSentiment} disabled={loadingSentiment || !sentimentText.trim()} className="mb-4 w-full rounded-xl bg-[#2f8ae0] px-5 py-3 text-sm font-semibold text-white shadow-sm disabled:opacity-60">
                   {loadingSentiment ? "Analyzing..." : "Run Sentiment Analysis"}
                 </button>
                 <div className="grid grid-cols-[0.9fr_1.1fr] items-center gap-4">
@@ -1003,6 +1053,14 @@ const AdminDashboard = () => {
                 selectedAuditBatchId={selectedAuditBatchId}
               />
             </div>
+
+            <div className="mt-5"><ReviewerPermissionsPanel /></div>
+
+            <section id="admin-cold-chain" className="mt-6 space-y-5"><TemperatureAlertPanel role="admin" /><SimulatorPanel /></section>
+            <div id="shipment-journey"><TraceabilityPanel /></div>
+            <div className="mt-5"><SystemReadinessPanel /></div>
+            <SupplyPlannerPanel />
+            <ForecastAnalyticsPanel role="admin" />
 
             <div className="mt-4" id="admin-blockchain-audit">
               <BlockchainLog

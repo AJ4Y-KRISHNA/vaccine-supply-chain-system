@@ -1,0 +1,294 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1580" viewBox="0 0 1920 1580" role="img" aria-labelledby="title desc">
+  <title id="title">Current Vaccine Supply Chain System Architecture</title>
+  <desc id="desc">Current implemented local demo architecture: synthetic simulator and manual input enter through Mosquitto, edge gateway, Express API and Redis Streams. A separate backend worker runs persistence, approved policy, AI advisory and Merkle anchoring consumer groups. MongoDB, FastAPI, notification outbox and local Hardhat support the role dashboards, field panel, QR verification and approval-only supply planning.</desc>
+  <defs>
+    <linearGradient id="hero" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#10273f"/><stop offset=".56" stop-color="#16445f"/><stop offset="1" stop-color="#13645f"/></linearGradient>
+    <linearGradient id="canvas" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f5f8fc"/><stop offset="1" stop-color="#eaf1f7"/></linearGradient>
+    <linearGradient id="planning" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#eff5fb"/><stop offset="1" stop-color="#f3effa"/></linearGradient>
+    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#91a9bd" opacity=".15"/></pattern>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="145%"><feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#193751" flood-opacity=".11"/></filter>
+    <marker id="arrow" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto"><path d="M1 1L10 5.5 1 10" fill="none" stroke="#607d94" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>
+    <marker id="blueArrow" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto"><path d="M1 1L10 5.5 1 10" fill="none" stroke="#2183b8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>
+    <style>
+      text{font-family:Inter,"Segoe UI",Arial,sans-serif;fill:#19364f}
+      .heroTitle{font-size:34px;font-weight:760;letter-spacing:.3px;fill:#fff}
+      .heroSub{font-size:16px;fill:#c6dae6}
+      .heroBadge{font-size:11px;font-weight:750;letter-spacing:.75px;fill:#ecf7f5}
+      .section{font-size:12px;font-weight:800;letter-spacing:1.25px;fill:#347598}
+      .groupTitle{font-size:12px;font-weight:800;letter-spacing:1px;fill:#658099}
+      .title{font-size:16px;font-weight:730;fill:#19364f}
+      .body{font-size:12.4px;fill:#526b80}
+      .small{font-size:11px;fill:#637d92}
+      .tiny{font-size:10px;fill:#6e8497}
+      .muted{font-size:10px;fill:#7b8fa0}
+      .white{fill:#f4f8fb}
+      .card{fill:#fff;stroke:#dbe5ed;stroke-width:1.2;rx:16;filter:url(#shadow)}
+      .line{fill:none;stroke:#728da2;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+      .dataLine{fill:none;stroke:#2183b8;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#blueArrow)}
+      .serviceLine{fill:none;stroke:#728da2;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1920" height="1580" fill="url(#canvas)"/>
+  <rect width="1920" height="132" fill="url(#hero)"/>
+  <rect x="0" y="132" width="1920" height="1448" fill="url(#dots)"/>
+  <circle cx="1810" cy="-36" r="172" fill="#63b8a2" opacity=".10"/>
+  <circle cx="1748" cy="64" r="78" fill="none" stroke="#b5e1d5" stroke-width="1" opacity=".16"/>
+  <text x="64" y="54" class="heroTitle">VACCINE SUPPLY CHAIN</text>
+  <text x="66" y="86" class="heroSub">Current implemented architecture · local synthetic demo</text>
+  <rect x="1445" y="34" width="210" height="36" rx="18" fill="#28566b" stroke="#58907e"/>
+  <circle cx="1463" cy="52" r="4" fill="#70d2ab"/>
+  <text x="1476" y="56" class="heroBadge">10-SERVICE COMPOSE STACK</text>
+  <rect x="1667" y="34" width="188" height="36" rx="18" fill="#28566b" stroke="#58907e"/>
+  <text x="1691" y="56" class="heroBadge">SYNTHETIC DATA ONLY</text>
+
+  <!-- Main current-state system boundary -->
+  <rect x="48" y="154" width="1824" height="1090" rx="24" fill="#f9fbfd" fill-opacity=".90" stroke="#b8cbd9" stroke-width="1.4" stroke-dasharray="8 7"/>
+  <rect x="76" y="138" width="289" height="32" rx="16" fill="#e8f1f7" stroke="#b8cbd9"/>
+  <circle cx="95" cy="154" r="4" fill="#318b84"/>
+  <text x="108" y="158" class="groupTitle">ACTIVE LOCAL COMPOSE ENVIRONMENT</text>
+
+  <text x="72" y="203" class="section">01  INGESTION &amp; EVENT BACKBONE</text>
+
+  <!-- Ingress nodes -->
+  <rect x="64" y="222" width="266" height="198" class="card"/>
+  <rect x="64" y="222" width="266" height="6" rx="3" fill="#4e9bc3"/>
+  <circle cx="96" cy="260" r="18" fill="#e5f3fa"/>
+  <path d="M92 248h8v16a4 4 0 0 1-8 0z M94 244h4v4h-4 M94 258h4" fill="none" stroke="#2f82ad" stroke-width="1.7" stroke-linecap="round"/>
+  <text x="124" y="258" class="title">Inputs</text>
+  <text x="86" y="294" class="body" font-weight="700">IoT simulator</text>
+  <text x="86" y="314" class="small">Synthetic temp, humidity, GPS, battery</text>
+  <line x1="86" y1="331" x2="308" y2="331" stroke="#e7edf2"/>
+  <text x="86" y="353" class="body" font-weight="700">Manual / CSV workflows</text>
+  <text x="86" y="373" class="small">Readings, orders and inventory</text>
+  <text x="86" y="400" class="tiny">Role-protected forms preserve actor and source.</text>
+
+  <rect x="364" y="222" width="194" height="198" class="card"/>
+  <rect x="364" y="222" width="194" height="6" rx="3" fill="#4b85b7"/>
+  <circle cx="396" cy="260" r="18" fill="#e8eef9"/>
+  <path d="M387 255l9-5 9 5-9 5z M387 260l9 5 9-5 M387 265l9 5 9-5" fill="none" stroke="#4b70a7" stroke-width="1.6" stroke-linejoin="round"/>
+  <text x="424" y="258" class="title">Mosquitto</text>
+  <text x="386" y="300" class="body">MQTT broker</text>
+  <text x="386" y="325" class="small">Authenticated topics</text>
+  <text x="386" y="347" class="small">QoS 1 delivery</text>
+  <rect x="386" y="372" width="150" height="27" rx="13" fill="#eef3fa"/>
+  <text x="400" y="390" class="tiny" font-weight="700">Private local network</text>
+
+  <rect x="592" y="222" width="252" height="198" class="card"/>
+  <rect x="592" y="222" width="252" height="6" rx="3" fill="#318b84"/>
+  <circle cx="624" cy="260" r="18" fill="#e6f4f0"/>
+  <path d="M615 254h18v12h-18z M618 257h3 M623 257h3 M628 257h2 M620 268v4 M628 268v4 M617 272h14" fill="none" stroke="#318477" stroke-width="1.5" stroke-linecap="round"/>
+  <text x="652" y="258" class="title">Edge Gateway</text>
+  <text x="614" y="300" class="body">Authenticate + validate</text>
+  <text x="614" y="323" class="body">Durable ordered buffer</text>
+  <text x="614" y="346" class="body">EWMA, rate + local threshold</text>
+  <text x="614" y="384" class="tiny">HTTP fallback / signed ingest</text>
+
+  <rect x="878" y="222" width="252" height="198" class="card"/>
+  <rect x="878" y="222" width="252" height="6" rx="3" fill="#5574b2"/>
+  <circle cx="910" cy="260" r="18" fill="#edf0fb"/>
+  <path d="M902 253h16v15h-16z M906 257h8 M906 261h8 M906 265h5" fill="none" stroke="#536ca9" stroke-width="1.6" stroke-linecap="round"/>
+  <text x="938" y="258" class="title">Express API</text>
+  <text x="900" y="300" class="body">Authenticated shared ingress</text>
+  <text x="900" y="323" class="body">Validation + event identity</text>
+  <text x="900" y="346" class="body">Manual / CSV endpoints</text>
+  <rect x="900" y="372" width="208" height="27" rx="13" fill="#f0f2fa"/>
+  <text x="913" y="390" class="tiny" font-weight="700">REST + WebSocket reads</text>
+
+  <rect x="1164" y="222" width="228" height="198" class="card"/>
+  <rect x="1164" y="222" width="228" height="6" rx="3" fill="#c7684b"/>
+  <circle cx="1196" cy="260" r="18" fill="#fceee9"/>
+  <path d="M1187 255l9-5 9 5-9 5z M1187 260l9 5 9-5 M1187 265l9 5 9-5" fill="none" stroke="#bd684f" stroke-width="1.6" stroke-linejoin="round"/>
+  <text x="1224" y="258" class="title">Redis Streams</text>
+  <text x="1186" y="300" class="body">telemetry.accepted</text>
+  <text x="1186" y="323" class="body">Dedupe + receipts</text>
+  <text x="1186" y="346" class="body">Retry + dead letters</text>
+  <rect x="1186" y="372" width="184" height="27" rx="13" fill="#fff3ed"/>
+  <text x="1198" y="390" class="tiny" font-weight="700">At-least-once stream</text>
+
+  <rect x="1426" y="222" width="430" height="198" class="card"/>
+  <rect x="1426" y="222" width="430" height="6" rx="3" fill="#795aa4"/>
+  <circle cx="1458" cy="260" r="18" fill="#f1ecf8"/>
+  <path d="M1451 252h14v5h-14z M1451 260h14v5h-14z M1451 268h14v5h-14z M1454 254h2 M1454 262h2 M1454 270h2" fill="none" stroke="#76559d" stroke-width="1.5" stroke-linecap="round"/>
+  <text x="1486" y="258" class="title">Backend worker</text>
+  <text x="1450" y="300" class="body">Separate worker container / process</text>
+  <text x="1450" y="323" class="body">Four logical consumer groups</text>
+  <text x="1450" y="346" class="body">Independent retries + receipts</text>
+  <rect x="1450" y="372" width="382" height="27" rx="13" fill="#f5f1fa"/>
+  <text x="1464" y="390" class="tiny" font-weight="700">One sequential loop per group</text>
+
+  <!-- Main ingestion path -->
+  <path d="M330 318H356" class="dataLine"/>
+  <path d="M558 318H584" class="dataLine"/>
+  <path d="M844 318H870" class="dataLine"/>
+  <path d="M1130 318H1156" class="dataLine"/>
+  <path d="M1392 318H1418" class="dataLine"/>
+  <text x="332" y="303" class="muted">MQTT</text>
+  <text x="560" y="303" class="muted">device feed</text>
+  <text x="846" y="303" class="muted">signed</text>
+  <text x="1134" y="303" class="muted">publish</text>
+  <text x="1393" y="303" class="muted">consume</text>
+  <!-- Manual / CSV bypasses MQTT and the edge gateway and uses API validation. -->
+  <path d="M200 420V446H1004V428" fill="none" stroke="#5574b2" stroke-width="1.8" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
+  <rect x="496" y="432" width="218" height="25" rx="12" fill="#eef1fa" stroke="#dce3f2"/>
+  <text x="514" y="449" class="tiny" fill="#5168a4">Manual / CSV → shared API</text>
+
+  <!-- Worker consumer groups -->
+  <text x="72" y="496" class="section">02  ASYNC PROCESSING · CONSUMER GROUPS</text>
+  <text x="611" y="496" class="small">Persistence completes first; anchoring also waits for policy commit.</text>
+  <path d="M1641 420V510H274 M274 510H1644" class="line"/>
+  <path d="M274 510V529" class="serviceLine"/>
+  <path d="M730 510V529" class="serviceLine"/>
+  <path d="M1186 510V529" class="serviceLine"/>
+  <path d="M1644 510V529" class="serviceLine"/>
+
+  <rect x="64" y="540" width="420" height="230" class="card"/>
+  <rect x="64" y="540" width="420" height="7" rx="3" fill="#3285b3"/>
+  <circle cx="100" cy="581" r="21" fill="#e8f3fa"/>
+  <ellipse cx="100" cy="574" rx="9" ry="4" fill="none" stroke="#3285b3" stroke-width="1.7"/>
+  <path d="M91 574v13c0 5 18 5 18 0v-13 M91 581c0 5 18 5 18 0" fill="none" stroke="#3285b3" stroke-width="1.7"/>
+  <text x="138" y="577" class="groupTitle">GROUP 1 · PERSISTENCE</text>
+  <text x="88" y="620" class="title">Store accepted telemetry</text>
+  <text x="88" y="652" class="body">Idempotent reading + time-series writes</text>
+  <text x="88" y="675" class="body">Location, edge flags and event identity</text>
+  <rect x="88" y="709" width="372" height="38" rx="10" fill="#edf5fa"/>
+  <text x="102" y="733" class="small" font-weight="700">MongoDB completion receipt</text>
+
+  <rect x="520" y="540" width="420" height="230" class="card"/>
+  <rect x="520" y="540" width="420" height="7" rx="3" fill="#cf813e"/>
+  <circle cx="556" cy="581" r="21" fill="#fcf1e6"/>
+  <path d="M547 581l6 6 12-14 M552 568h10" fill="none" stroke="#bd7334" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="594" y="577" class="groupTitle">GROUP 2 · POLICY ALERT</text>
+  <text x="544" y="620" class="title">Approved batch rules</text>
+  <text x="544" y="652" class="body">Excursion review and quarantine holds</text>
+  <text x="544" y="675" class="body">Audit + outbox committed transactionally</text>
+  <rect x="544" y="709" width="372" height="38" rx="10" fill="#fff5e9"/>
+  <text x="558" y="733" class="small" font-weight="700">Authoritative hold and release workflow</text>
+
+  <rect x="976" y="540" width="420" height="230" class="card"/>
+  <rect x="976" y="540" width="420" height="7" rx="3" fill="#7959a7"/>
+  <circle cx="1012" cy="581" r="21" fill="#f1ecf8"/>
+  <path d="M1002 588l5-9 5 5 6-13 M1002 591h18" fill="none" stroke="#7959a7" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="1050" y="577" class="groupTitle">GROUP 3 · AI ADVISORY</text>
+  <text x="1000" y="620" class="title">FastAPI anomaly context</text>
+  <text x="1000" y="652" class="body">Recent temperature history + trend features</text>
+  <text x="1000" y="675" class="body">Save score / explanation with the reading</text>
+  <rect x="1000" y="709" width="372" height="38" rx="10" fill="#f5f1fa"/>
+  <text x="1014" y="733" class="small" font-weight="700">Advisory only · cannot set safety holds</text>
+
+  <rect x="1432" y="540" width="424" height="230" class="card"/>
+  <rect x="1432" y="540" width="424" height="7" rx="3" fill="#31876f"/>
+  <circle cx="1468" cy="581" r="21" fill="#e9f5f0"/>
+  <path d="M1468 567l10 5v8c0 7-5 11-10 13-5-2-10-6-10-13v-8z M1463 580l4 4 7-8" fill="none" stroke="#31876f" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="1506" y="577" class="groupTitle">GROUP 4 · ANCHORING</text>
+  <text x="1456" y="620" class="title">Merkle sensor evidence</text>
+  <text x="1456" y="652" class="body">Batch-linked leaves → time-window roots</text>
+  <text x="1456" y="675" class="body">Proof metadata in Mongo; root on Hardhat</text>
+  <rect x="1456" y="709" width="376" height="38" rx="10" fill="#edf7f2"/>
+  <text x="1470" y="733" class="small" font-weight="700">Asynchronous local chain confirmation</text>
+
+  <text x="72" y="836" class="section">03  DATA STORES &amp; SUPPORTING SERVICES</text>
+  <text x="72" y="858" class="small">Each consumer group uses the service below; MongoDB remains the application query source.</text>
+  <path d="M274 770V882" class="serviceLine"/>
+  <path d="M730 770V882" class="serviceLine"/>
+  <path d="M1186 770V882" class="serviceLine"/>
+  <path d="M1644 770V882" class="serviceLine"/>
+
+  <rect x="64" y="892" width="420" height="190" class="card"/>
+  <circle cx="100" cy="930" r="18" fill="#e8f3fa"/>
+  <path d="M91 925h18v13H91z M94 922h12v3H94 M95 930h10 M95 934h7" fill="none" stroke="#3285b3" stroke-width="1.5" stroke-linecap="round"/>
+  <text x="130" y="934" class="title">MongoDB replica set</text>
+  <text x="88" y="971" class="body">Readings · timeseries · location · policy</text>
+  <text x="88" y="994" class="body">Alerts · audit · orders · inventory · forecasts</text>
+  <text x="88" y="1017" class="body">Outbox rows · Merkle leaves and proofs</text>
+  <text x="88" y="1056" class="tiny">Primary durable application and query store.</text>
+
+  <rect x="520" y="892" width="420" height="190" class="card"/>
+  <circle cx="556" cy="930" r="18" fill="#fff3e8"/>
+  <path d="M548 922h16v16h-16z M551 926h10 M551 930h10 M551 934h7" fill="none" stroke="#c47a39" stroke-width="1.5" stroke-linecap="round"/>
+  <text x="586" y="934" class="title">Notification delivery</text>
+  <text x="544" y="971" class="body">Transactional durable outbox in Mongo</text>
+  <text x="544" y="994" class="body">Role-scoped in-app notifications</text>
+  <text x="544" y="1017" class="body">Optional email via retrying dispatcher</text>
+  <text x="544" y="1056" class="tiny">Compose email is Ethereal test capture.</text>
+
+  <rect x="976" y="892" width="420" height="190" class="card"/>
+  <circle cx="1012" cy="930" r="18" fill="#f1ecf8"/>
+  <path d="M1003 938v-14h18v14z M1007 934l4-4 3 3 4-6" fill="none" stroke="#7959a7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="1042" y="934" class="title">AI services · FastAPI</text>
+  <text x="1000" y="971" class="body">Telemetry anomaly advisory</text>
+  <text x="1000" y="994" class="body">Regional demand forecast + metrics</text>
+  <text x="1000" y="1017" class="body">Constrained allocation preview (LP)</text>
+  <text x="1000" y="1056" class="tiny">Synthetic forecast input; approval required.</text>
+
+  <rect x="1432" y="892" width="424" height="190" class="card"/>
+  <circle cx="1468" cy="930" r="18" fill="#eaf6f0"/>
+  <path d="M1459 930l9-6 9 6-9 6z M1459 930v9l9 5 9-5v-9 M1468 936v8" fill="none" stroke="#31876f" stroke-width="1.5" stroke-linejoin="round"/>
+  <text x="1498" y="934" class="title">Hardhat local chain</text>
+  <text x="1456" y="971" class="body">Local EVM · chain ID 31337</text>
+  <text x="1456" y="994" class="body">Merkle root / batch / window metadata</text>
+  <text x="1456" y="1017" class="body">QR check combines chain root + Mongo proof</text>
+  <text x="1456" y="1056" class="tiny">Ephemeral local development chain.</text>
+
+  <!-- Store and service results feed role-scoped application views. -->
+  <path d="M274 1082V1102 M730 1082V1102 M1186 1082V1102 M1644 1082V1102 M274 1102H1644" class="line"/>
+  <path d="M350 1102V1120 M960 1102V1120 M1560 1102V1120" class="serviceLine"/>
+  <text x="690" y="1114" class="tiny">authorized API reads · live alerts · proof verification</text>
+
+  <rect x="64" y="1130" width="560" height="94" class="card"/>
+  <circle cx="99" cy="1177" r="17" fill="#edf0fb"/>
+  <path d="M90 1171h18v12H90z M95 1186h8 M99 1183v3 M94 1174h10 M94 1178h5" fill="none" stroke="#586eaa" stroke-width="1.5" stroke-linecap="round"/>
+  <text x="128" y="1173" class="title">React role dashboards</text>
+  <text x="128" y="1197" class="small">Admin · Manufacturer · Distributor · Healthcare</text>
+  <text x="128" y="1215" class="tiny">Shipment views, alerts, maps, analytics and reports.</text>
+
+  <rect x="680" y="1130" width="560" height="94" class="card"/>
+  <circle cx="715" cy="1177" r="17" fill="#e9f5f0"/>
+  <path d="M706 1171h18v12h-18z M710 1175h10 M710 1179h7 M710 1186h10" fill="none" stroke="#31876f" stroke-width="1.5" stroke-linecap="round"/>
+  <text x="744" y="1173" class="title">Field Operator Panel</text>
+  <text x="744" y="1197" class="small">Role-scoped field workflow and alerts</text>
+  <text x="744" y="1215" class="tiny">Keeps synthetic-data context visible.</text>
+
+  <rect x="1296" y="1130" width="560" height="94" class="card"/>
+  <circle cx="1331" cy="1177" r="17" fill="#eef1fa"/>
+  <path d="M1322 1171h18v12h-18z M1326 1174h10 M1326 1178h5 M1334 1178h2 M1328 1186h6" fill="none" stroke="#586eaa" stroke-width="1.5" stroke-linecap="round"/>
+  <text x="1360" y="1173" class="title">Authenticated QR verification</text>
+  <text x="1360" y="1197" class="small">Batch identity and sensor proof are reported separately.</text>
+  <text x="1360" y="1215" class="tiny">Evidence status: yes · pending · no / mismatch.</text>
+
+  <!-- Approval-only demand and allocation path -->
+  <rect x="64" y="1274" width="1792" height="250" rx="22" fill="url(#planning)" stroke="#cfdeea" stroke-width="1.2" filter="url(#shadow)"/>
+  <text x="90" y="1312" class="section">04  SUPPLY PLANNING · CURRENT APPROVAL-ONLY WORKFLOW</text>
+  <text x="90" y="1338" class="small">Operational order / inventory history is analyzed separately from sensor policy decisions.</text>
+  <rect x="90" y="1362" width="300" height="104" rx="14" fill="#fff" stroke="#dce5ed"/>
+  <circle cx="118" cy="1391" r="13" fill="#e8f3fa"/>
+  <path d="M112 1387h12v10h-12z M115 1384h6v3h-6" fill="none" stroke="#3285b3" stroke-width="1.3"/>
+  <text x="142" y="1397" class="title">Orders + inventory</text>
+  <text x="112" y="1432" class="small">Stored operational history</text>
+  <path d="M390 1414H430" class="dataLine"/>
+  <rect x="440" y="1362" width="338" height="104" rx="14" fill="#fff" stroke="#e5d9ef"/>
+  <circle cx="468" cy="1391" r="13" fill="#f1ecf8"/>
+  <path d="M462 1398v-12h12v12z M464 1395l3-3 2 2 3-5" fill="none" stroke="#7959a7" stroke-width="1.3"/>
+  <text x="492" y="1397" class="title">Regional forecast</text>
+  <text x="462" y="1432" class="small">Synthetic series + forecast metrics</text>
+  <path d="M778 1414H818" class="dataLine"/>
+  <rect x="828" y="1362" width="366" height="104" rx="14" fill="#fff" stroke="#d6e4ef"/>
+  <circle cx="856" cy="1391" r="13" fill="#e8f3fa"/>
+  <path d="M849 1398l4-8 4 4 6-8 M849 1401h14" fill="none" stroke="#3285b3" stroke-width="1.3" stroke-linecap="round"/>
+  <text x="880" y="1397" class="title">Constrained LP preview</text>
+  <text x="850" y="1432" class="small">Inventory · capacity · shelf life</text>
+  <path d="M1194 1414H1234" class="dataLine"/>
+  <rect x="1244" y="1362" width="284" height="104" rx="14" fill="#fff" stroke="#f0dfca"/>
+  <circle cx="1272" cy="1391" r="13" fill="#fff3e8"/>
+  <path d="M1266 1391l4 4 8-9 M1267 1385h9" fill="none" stroke="#c47a39" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="1296" y="1397" class="title">Human review</text>
+  <text x="1266" y="1432" class="small">Approval required</text>
+  <path d="M1528 1414H1568" class="dataLine"/>
+  <rect x="1578" y="1362" width="250" height="104" rx="14" fill="#fff" stroke="#d2e7dc"/>
+  <circle cx="1606" cy="1391" r="13" fill="#e9f5f0"/>
+  <path d="M1600 1387h12v9h-12z M1603 1390h6 M1603 1393h6" fill="none" stroke="#31876f" stroke-width="1.3"/>
+  <text x="1630" y="1397" class="title">Approved plan</text>
+  <text x="1600" y="1432" class="small">No automatic dispatch</text>
+  <text x="90" y="1495" class="tiny">Synthetic inputs are not external demand validation. Seed stock can remain ineligible until manufacturing release gates pass.</text>
+
+  <text x="64" y="1556" class="tiny">Prototype boundary: private local Compose traffic, software-generated telemetry and a volatile local Hardhat chain. AI is advisory; approved batch policy controls holds. Physical hardware, public-chain verification and clinical validation are not implemented.</text>
+</svg>

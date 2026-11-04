@@ -1,0 +1,34 @@
+{
+  "instructions": "Template only. No importer executes this file. Use the read-only audit to obtain exact record IDs; leave unknown values null. Do not infer medical or ownership facts.",
+  "recordClassification": null,
+  "reviewedBy": null,
+  "reason": null,
+  "shipmentMappings": [
+    {
+      "recordId": "REPLACE_WITH_EXISTING_SHIPMENT_OBJECT_ID",
+      "expectedOldBatchId": "REPLACE_WITH_AUDITED_OLD_ID",
+      "confirmedBatchId": null,
+      "confirmedVaccineType": null,
+      "confirmedQuantity": null,
+      "confirmedDistributor": null,
+      "confirmedDestination": null,
+      "sourceEvidence": null
+    }
+  ],
+  "manufacturerMappings": [
+    {
+      "batchRecordId": "REPLACE_WITH_EXISTING_BATCH_OBJECT_ID",
+      "expectedOldManufacturer": "REPLACE_WITH_AUDITED_VALUE",
+      "confirmedManufacturerAccountId": null,
+      "sourceEvidence": null
+    }
+  ],
+  "telemetryMappings": [
+    {
+      "recordId": "REPLACE_WITH_EXISTING_TEMPERATURE_LOG_OBJECT_ID",
+      "expectedOldBatchId": "REPLACE_WITH_AUDITED_OLD_ID",
+      "confirmedBatchId": null,
+      "sourceEvidence": null
+    }
+  ]
+}

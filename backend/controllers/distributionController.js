@@ -11,6 +11,34 @@ const TemperatureLog = require("../models/TemperatureLog");
 const Notification = require("../models/Notification");
 const Vaccination = require("../models/Vaccination");
 const { getDistributionDecision } = require("../services/aiService");
+const fieldOperatorEvents = require("../services/fieldOperatorEventBus");
+
+function publishSavedShipmentStatus(shipment, reason) {
+  if (!shipment?.shipmentId || !shipment.status) return;
+  // Prefer the simulator's current clock when available; otherwise use the
+  // persisted workflow update time. A push failure must not undo the workflow.
+  TemperatureLog.findOne({ shipmentId: shipment.shipmentId }).sort({ recordedAt: -1, _id: -1 }).select("recordedAt").lean()
+    .then(latest => {
+      fieldOperatorEvents.publishStatusChange(shipment.shipmentId, {
+        newStatus: shipment.status,
+        reason,
+        simulationClock: latest?.recordedAt || shipment.lastUpdatedAt || new Date(),
+      });
+      return require("../services/dashboardEventBus").publishShipmentStatus(shipment, reason);
+    })
+    .catch(() => {});
+}
+
+async function requireReleasedShipment(shipment) {
+  const batch = await Batch.findOne({ batchId: shipment.batchId }).lean();
+  if (!batch || !batch.releaseVisibleToExternal || !batch.productionApproved || !batch.labApproved || batch.reportStatus !== "Reported") {
+    throw Object.assign(new Error("Batch is not released for distribution"), { status: 409 });
+  }
+  if (shipment.vaccineType !== batch.vaccineType) throw Object.assign(new Error("Shipment vaccine type does not match the manufacturer batch; reconcile the shipment before proceeding"), { status: 409 });
+  if (!Number.isSafeInteger(shipment.quantity) || shipment.quantity <= 0) throw Object.assign(new Error("Shipment must contain a positive whole-number quantity"), { status: 409 });
+  return batch;
+}
+const shipmentState = shipment => String(shipment.status || "").toLowerCase();
 
 function computeCurrentHospitalStock(records, vaccineType) {
   const receiptBuckets = new Map();
@@ -171,6 +199,9 @@ exports.createDistribution = async (req, res) => {
 // Distributor DFD 2.0 - receive batch info from manufacturer
 exports.receiveBatchInfo = async (req, res) => {
   try {
+    const batch = await Batch.findOne({ batchId: req.body.batchId }).lean();
+    if (batch && req.body.vaccineType && req.body.vaccineType !== batch.vaccineType) return res.status(400).json({ error: "Vaccine type does not match the manufacturer batch" });
+    if (batch) req.body.vaccineType = batch.vaccineType;
     const {
       shipmentId = `SHIP-${Date.now()}`,
       batchId,
@@ -183,6 +214,7 @@ exports.receiveBatchInfo = async (req, res) => {
 
     const lifecycleReceipt = await logLifecycleEventOnChain({
       batchId: batchId || shipmentId,
+      shipmentId, vehicleId: req.body.vehicleId || "", routeId: req.body.routeId || "",
       actorRole: "Distributor",
       action: "Receive Vaccine Batch",
       location: destination || source,
@@ -192,6 +224,7 @@ exports.receiveBatchInfo = async (req, res) => {
 
     const shipment = await Shipment.create({
       shipmentId,
+      vehicleId: req.body.vehicleId || "", routeId: req.body.routeId || "",
       batchId,
       vaccineType,
       quantity,
@@ -227,11 +260,14 @@ exports.verifyVaccineDetails = async (req, res) => {
       return res.status(404).json({ error: "Shipment not found" });
     }
 
-    const batch = await Batch.findOne({ batchId: shipment.batchId }).lean();
+    const batch = await requireReleasedShipment(shipment);
+    if (shipment.hospitalConfirmed || /transit|supplied|delivered|confirmed/.test(shipmentState(shipment))) return res.status(409).json({ error: "Shipment has already progressed beyond verification" });
     const verified = Boolean(batch && (batch.vaccineType || shipment.vaccineType));
+    if (shipment.status === "Verified") return res.json({ shipment, alreadyVerified: true, verification: { matchedBatch: true, vaccineType: batch.vaccineType, blockchainLogged: Boolean(shipment.txHash), status: "Verified" } });
 
     const lifecycleReceipt = await logLifecycleEventOnChain({
       batchId: shipment.batchId || shipmentId,
+      shipmentId: shipment.shipmentId, vehicleId: shipment.vehicleId || "", routeId: shipment.routeId || "",
       actorRole: "Distributor",
       action: "Verify Vaccine Details",
       location: shipment.destination || shipment.source,
@@ -248,11 +284,11 @@ exports.verifyVaccineDetails = async (req, res) => {
       timestamp: new Date(),
       txHash,
     });
-    await shipment.save();
-
     if (verified && shipment.batchId) {
       await updateBatchStatusOnChain(shipment.batchId, "Verified");
     }
+    await shipment.save();
+    publishSavedShipmentStatus(shipment, "Distributor verified the shipment against its batch record.");
 
     res.json({
       shipment,
@@ -264,7 +300,7 @@ exports.verifyVaccineDetails = async (req, res) => {
       },
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 };
 
@@ -278,6 +314,12 @@ exports.updateDeliveryStatus = async (req, res) => {
     if (!shipment) {
       return res.status(404).json({ error: "Shipment not found" });
     }
+    await requireReleasedShipment(shipment);
+    if (status !== "In Transit") return res.status(400).json({ error: "Use In Transit after verification, then the supply and hospital receipt actions" });
+    if (shipment.hospitalConfirmed || /supplied|delivered|confirmed/.test(shipmentState(shipment))) return res.status(409).json({ error: "A supplied or confirmed shipment cannot be dispatched again" });
+    if (shipment.status === "In Transit") return res.json({ ...shipment.toObject(), alreadyDispatched: true });
+    if (shipment.status !== "Verified") return res.status(409).json({ error: "Verify vaccine details before dispatch" });
+    if (currentTemperature !== undefined && (typeof currentTemperature !== "number" || !Number.isFinite(currentTemperature))) return res.status(400).json({ error: "Current temperature must be a finite number" });
 
     const receipt = await recordOnBlockchain({
       batchId: shipment.batchId,
@@ -292,6 +334,7 @@ exports.updateDeliveryStatus = async (req, res) => {
       batchId: shipment.batchId || shipmentId,
       actorRole: "Distributor",
       action: "Update Distribution Information",
+      shipmentId: shipment.shipmentId, vehicleId: shipment.vehicleId || "", routeId: shipment.routeId || "",
       location: shipment.destination || shipment.source,
       details: status || shipment.status,
       quantity: shipment.quantity || 0,
@@ -306,19 +349,19 @@ exports.updateDeliveryStatus = async (req, res) => {
       timestamp: new Date(),
       txHash,
     });
-    await shipment.save();
-
+    if (shipment.batchId) {
+      await updateBatchStatusOnChain(shipment.batchId, shipment.status);
+    }
     await Batch.updateOne(
       { batchId: shipment.batchId },
       { $set: { status: shipment.status } }
     );
-    if (shipment.batchId) {
-      await updateBatchStatusOnChain(shipment.batchId, shipment.status);
-    }
+    await shipment.save();
+    publishSavedShipmentStatus(shipment, "Distributor dispatched the verified shipment.");
 
     res.json(shipment);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 };
 
@@ -332,6 +375,11 @@ exports.supplyVaccinationCenter = async (req, res) => {
     if (!shipment) {
       return res.status(404).json({ error: "Shipment not found" });
     }
+    await requireReleasedShipment(shipment);
+    if (status !== "Supplied to Vaccination Center") return res.status(400).json({ error: "Use the supply action without overriding the shipment status" });
+    if (shipment.hospitalConfirmed || /supplied|delivered|confirmed/.test(shipmentState(shipment))) return res.json({ ...shipment.toObject(), alreadySupplied: true });
+    if (shipment.status !== "In Transit") return res.status(409).json({ error: "Verify and dispatch the shipment before supplying the hospital" });
+    if (currentTemperature !== undefined && (typeof currentTemperature !== "number" || !Number.isFinite(currentTemperature))) return res.status(400).json({ error: "Current temperature must be a finite number" });
 
     const receipt = await recordOnBlockchain({
       batchId: shipment.batchId,
@@ -347,6 +395,7 @@ exports.supplyVaccinationCenter = async (req, res) => {
       batchId: shipment.batchId || shipmentId,
       actorRole: "Distributor",
       action: "Supply Vaccination Center",
+      shipmentId: shipment.shipmentId, vehicleId: shipment.vehicleId || "", routeId: shipment.routeId || "",
       location: destination || shipment.destination,
       details: status,
       quantity: shipment.quantity || 0,
@@ -361,8 +410,9 @@ exports.supplyVaccinationCenter = async (req, res) => {
       timestamp: new Date(),
       txHash,
     });
-    await shipment.save();
-
+    if (shipment.batchId) {
+      await updateBatchStatusOnChain(shipment.batchId, "Supplied to Center");
+    }
     await Batch.updateOne(
       { batchId: shipment.batchId },
       {
@@ -372,11 +422,8 @@ exports.supplyVaccinationCenter = async (req, res) => {
         },
       }
     );
-    if (shipment.batchId) {
-      await updateBatchStatusOnChain(shipment.batchId, "Supplied to Center");
-    }
-
-    await Distribution.create({
+    await Distribution.findOneAndUpdate({ shipmentId: shipment.shipmentId }, { $setOnInsert: {
+      shipmentId: shipment.shipmentId,
       batchId: shipment.batchId,
       demand: shipment.quantity,
       supply: shipment.quantity,
@@ -384,11 +431,15 @@ exports.supplyVaccinationCenter = async (req, res) => {
       txHash,
       targetCenter: shipment.destination,
       blockchainStatus: txHash === "pending" ? "Pending" : "Logged",
-    });
+    } }, { upsert: true, new: true });
+    // Final marker is saved only after required side effects. A retry can reuse
+    // the shipment-keyed distribution record if this final database save fails.
+    await shipment.save();
+    publishSavedShipmentStatus(shipment, "Distributor recorded supply to the destination hospital.");
 
     res.json(shipment);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 };
 
@@ -405,6 +456,8 @@ exports.confirmDeliveryReceipt = async (req, res) => {
     if (!shipment) {
       return res.status(404).json({ error: "Shipment not found" });
     }
+    await requireReleasedShipment(shipment);
+    if (!shipment.hospitalConfirmed && !/supplied|delivered/.test(shipmentState(shipment))) return res.status(409).json({ error: "The distributor must supply the shipment before the hospital can confirm receipt" });
 
     const hospitalName = hospital || shipment.destination || "Vaccination Center";
     const existingConfirmation = await Vaccination.findOne({
@@ -433,81 +486,52 @@ exports.confirmDeliveryReceipt = async (req, res) => {
         { centerId: hospitalName, vaccineType: shipment.vaccineType },
       ],
     }).lean();
-    const stockBefore = computeCurrentHospitalStock(existingRecords, shipment.vaccineType || "Mixed");
-    const receivedDoses = Number(shipment.quantity || 0);
-    const stockAfter = stockBefore + receivedDoses;
-
-    const lifecycleReceipt = await logLifecycleEventOnChain({
-      batchId: shipment.batchId || shipmentId,
-      actorRole: "Vaccination Center",
-      action: "Confirm Delivery Receipt",
-      location: hospitalName,
-      details: confirmationNote,
-      quantity: receivedDoses,
+    const stockBefore = existingConfirmation?.stockBefore ?? computeCurrentHospitalStock(existingRecords, shipment.vaccineType || "Mixed");
+    const receivedDoses = existingConfirmation?.receivedDoses ?? Number(shipment.quantity || 0);
+    const stockAfter = existingConfirmation?.stockAfter ?? stockBefore + receivedDoses;
+    const lifecycleReceipt = existingConfirmation ? null : await logLifecycleEventOnChain({
+      batchId: shipment.batchId || shipmentId, actorRole: "Vaccination Center",
+      action: "Confirm Delivery Receipt", location: hospitalName,
+      shipmentId: shipment.shipmentId, vehicleId: shipment.vehicleId || "", routeId: shipment.routeId || "",
+      details: confirmationNote, quantity: receivedDoses,
     });
-    const txHash = extractHash(lifecycleReceipt) || shipment.txHash || "pending";
+    const txHash = existingConfirmation?.txHash || extractHash(lifecycleReceipt) || shipment.txHash || "pending";
 
+    if (shipment.batchId) {
+      await updateBatchStatusOnChain(shipment.batchId, "Delivery Confirmed by Hospital");
+      await Batch.updateOne({ batchId: shipment.batchId }, { $set: { status: "Delivery Confirmed by Hospital" } });
+    }
+    const confirmationRecord = existingConfirmation || await Vaccination.create({
+      hospital: hospitalName, centerId: hospitalName, shipmentId: shipment.shipmentId,
+      batchId: shipment.batchId, vaccineType: shipment.vaccineType,
+      receivedDoses, stockBefore, stockAfter, inventoryStatus: "Delivery Confirmed",
+      workflowStage: "1.2 Stock Management", eventType: "Delivery Confirmation",
+      notes: confirmationNote, note: confirmationNote, source: "manual", enteredBy: String(req.user?.id || ""),
+      txHash, blockchainStatus: txHash === "pending" ? "Pending" : "Logged",
+    });
+    await Notification.findOneAndUpdate({
+      recipientRole: "distributor", orderId: shipment.shipmentId, title: "Hospital Delivery Confirmed",
+    }, { $setOnInsert: {
+      recipientRole: "distributor", recipientRef: shipment.distributor || "Primary Distributor",
+      orderId: shipment.shipmentId, auditBatchId: shipment.batchId, title: "Hospital Delivery Confirmed",
+      message: `${hospitalName} confirmed receipt for ${receivedDoses} doses of ${shipment.vaccineType || "Mixed"} in shipment ${shipment.shipmentId}.`,
+      type: "success", metadata: { shipmentId: shipment.shipmentId, destination: shipment.destination,
+        confirmationNote, vaccineType: shipment.vaccineType || "Mixed", quantity: receivedDoses, txHash },
+    } }, { upsert: true, new: true });
+
+    // Do not hide this shipment from the receipt queue until the inventory and
+    // notification exist. Failed final saves can be retried without more doses.
     shipment.status = "Delivery Confirmed by Hospital";
     shipment.hospitalConfirmed = true;
     shipment.hospitalConfirmedAt = new Date();
-    shipment.hospitalConfirmationNote = confirmationNote;
+    shipment.hospitalConfirmationNote = confirmationRecord.notes || confirmationNote;
     shipment.confirmedBy = confirmedBy;
     shipment.txHash = txHash;
     shipment.lastUpdatedAt = new Date();
-    shipment.statusHistory.push({
-      status: "Delivery Confirmed by Hospital",
-      timestamp: new Date(),
-      txHash,
-    });
+    shipment.statusHistory.push({ status: "Delivery Confirmed by Hospital", timestamp: new Date(), txHash,
+      source: "manual", enteredBy: String(req.user?.id || ""), note: confirmationNote });
     await shipment.save();
-
-    if (shipment.batchId) {
-      await Batch.updateOne(
-        { batchId: shipment.batchId },
-        {
-          $set: {
-            status: "Delivery Confirmed by Hospital",
-          },
-        }
-      );
-      await updateBatchStatusOnChain(shipment.batchId, "Delivery Confirmed by Hospital");
-    }
-
-    await Notification.create({
-      recipientRole: "distributor",
-      recipientRef: shipment.distributor || "Primary Distributor",
-      orderId: shipment.shipmentId,
-      auditBatchId: shipment.batchId,
-      title: "Hospital Delivery Confirmed",
-      message: `${hospitalName} confirmed receipt for ${receivedDoses} doses of ${shipment.vaccineType || "Mixed"} in shipment ${shipment.shipmentId}.`,
-      type: "success",
-      metadata: {
-        shipmentId: shipment.shipmentId,
-        destination: shipment.destination,
-        confirmationNote,
-        vaccineType: shipment.vaccineType || "Mixed",
-        quantity: receivedDoses,
-        txHash,
-      },
-    });
-
-    const confirmationRecord = await Vaccination.create({
-      hospital: hospitalName,
-      centerId: hospitalName,
-      shipmentId: shipment.shipmentId,
-      batchId: shipment.batchId,
-      vaccineType: shipment.vaccineType,
-      receivedDoses,
-      stockBefore,
-      stockAfter,
-      inventoryStatus: "Delivery Confirmed",
-      workflowStage: "1.2 Stock Management",
-      eventType: "Delivery Confirmation",
-      notes: confirmationNote,
-      txHash,
-      blockchainStatus: txHash === "pending" ? "Pending" : "Logged",
-    });
-
+    publishSavedShipmentStatus(shipment, "Hospital confirmed receipt of the shipment.");
     res.json({
       success: true,
       shipment,
@@ -520,15 +544,15 @@ exports.confirmDeliveryReceipt = async (req, res) => {
       txHash,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 };
 
 // Distributor monitoring snapshot without mock data
 exports.getDistributorWorkflow = async (_req, res) => {
   try {
-    const shipments = await Shipment.find().sort({ createdAt: -1 }).lean();
-    const tempLogs = await TemperatureLog.find().sort({ recordedAt: -1 }).limit(20).lean();
+    const shipments = await Shipment.find(_req.scope.shipment).sort({ createdAt: -1 }).lean();
+    const tempLogs = await TemperatureLog.find(_req.scope.telemetry).sort({ recordedAt: -1 }).limit(20).lean();
     const verified = shipments.filter((shipment) =>
       (shipment.statusHistory || []).some((entry) => entry.status === "Verified")
     );
@@ -551,7 +575,7 @@ exports.getDistributorWorkflow = async (_req, res) => {
 // GET ALL
 exports.getAllDistributions = async (req, res) => {
   try {
-    const data = await Distribution.find().sort({ timestamp: -1 });
+    const data = await Distribution.find(req.scope.distribution).sort({ timestamp: -1 });
     res.json(data);
   } catch (err) {
     res.status(500).json(err);

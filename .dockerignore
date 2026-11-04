@@ -1,0 +1,13 @@
+.git
+.venv
+venv
+**/node_modules
+**/.env
+**/*.log
+**/build
+**/dist
+**/__pycache__
+**/.pytest_cache
+**/coverage
+frontend/.env*
+field-operator-panel/.env*

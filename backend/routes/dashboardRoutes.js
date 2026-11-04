@@ -8,11 +8,13 @@ const {
   getAdminDashboard,
 } = require("../controllers/dashboardController");
 
-// ✅ NO AUTH HERE
+const { authenticate, allowRoles } = require("../middleware/auth");
+const { scopeData } = require("../middleware/identityScope");
+router.use(authenticate, scopeData);
 
-router.get("/distributor", getDistributorDashboard);
-router.get("/manufacturer", getManufacturerDashboard);
-router.get("/healthcare", getHealthcareDashboard);
-router.get("/admin", getAdminDashboard);
+router.get("/distributor", allowRoles("distributor"), getDistributorDashboard);
+router.get("/manufacturer", allowRoles("manufacturer"), getManufacturerDashboard);
+router.get("/healthcare", allowRoles("healthcare"), getHealthcareDashboard);
+router.get("/admin", allowRoles(), getAdminDashboard);
 
 module.exports = router;

@@ -2,7 +2,12 @@ const mongoose = require("mongoose");
 
 const ShipmentSchema = new mongoose.Schema({
   shipmentId: String,
+  vehicleId: String,
+  routeId: String,
+  orderId: String,
   batchId: String,
+  coldChainHoldAlertIds: { type: [String], default: undefined },
+  coldChainStatus: String,
   vaccineType: String,
   quantity: Number,
   source: String,
@@ -31,6 +36,9 @@ const ShipmentSchema = new mongoose.Schema({
       status: String,
       timestamp: { type: Date, default: Date.now },
       txHash: String,
+      source: { type: String, enum: ["simulator", "manual", "csv"], default: "simulator" },
+      enteredBy: String,
+      note: String,
     }
   ],
 
@@ -41,4 +49,5 @@ const ShipmentSchema = new mongoose.Schema({
 
 });
 
+require("./demoFields")(ShipmentSchema);
 module.exports = mongoose.model("Shipment", ShipmentSchema);

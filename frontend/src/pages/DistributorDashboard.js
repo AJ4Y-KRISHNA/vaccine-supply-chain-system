@@ -1,8 +1,12 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import LiveShipmentVisualizer from "../components/LiveShipmentVisualizer";
+import TemperatureAlertPanel from "../components/TemperatureAlertPanel";
+import TraceabilityPanel from "../components/TraceabilityPanel";
+import StatusBadge from "../components/StatusBadge";
+import { LogoutButton } from "../components/SessionControls";
 import {
-  Truck, CheckSquare, Search, Bell, User, ChevronDown,
-  Shield, FileText, Anchor, Activity as ChartActivity, LogOut, Download, AlertTriangle, Home
+  Truck, CheckSquare, Search, Bell, User,
+  Shield, FileText, Activity as ChartActivity, LogOut, Download, AlertTriangle, Home, RefreshCw
 } from "lucide-react";
 import {
   Chart as ChartJS,
@@ -18,6 +22,9 @@ import { fetchDistributorDashboard } from "../services/dashboard";
 import { useToast } from "../components/Toast";
 import BlockchainLog from "../components/BlockchainLog";
 import { fetchDistributorOrders } from "../services/workflow";
+import { verifyShipment, dispatchShipment, supplyShipment } from "../services/distributorOperations";
+import { downloadOperationalCsv } from "../services/operationalExport";
+import ManualReadingEntry from "../components/ManualReadingEntry";
 
 ChartJS.register(
   CategoryScale,
@@ -30,56 +37,6 @@ ChartJS.register(
 
 const defaultDeliveryHistory = [0, 0, 0, 0, 0, 0, 0];
 const defaultLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-const destinationCoords = {
-  "City Hospital": { lat: 28.61, lng: 77.21, x: 74, y: 34 },
-  "District Center": { lat: 19.07, lng: 72.87, x: 54, y: 66 },
-  "Block Hospital": { lat: 22.57, lng: 88.36, x: 82, y: 56 },
-  "Medical College": { lat: 13.08, lng: 80.27, x: 70, y: 80 },
-  "Global Clinic": { lat: 12.97, lng: 77.59, x: 62, y: 82 },
-  Kerala: { lat: 10.85, lng: 76.27, x: 45, y: 84 },
-  Karnataka: { lat: 15.31, lng: 75.71, x: 49, y: 74 },
-  "Tamil Nadu": { lat: 11.12, lng: 78.65, x: 61, y: 86 },
-  London: { lat: 51.5, lng: -0.12, x: 18, y: 20 },
-  "New York": { lat: 40.71, lng: -74.0, x: 8, y: 28 },
-};
-
-function TrackingMap({ markers }) {
-  return (
-    <div className="relative h-full min-h-[280px] overflow-hidden rounded-xl bg-[linear-gradient(180deg,#edf7ff_0%,#dfefff_100%)]">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_22%,rgba(255,255,255,0.8),transparent_22%),radial-gradient(circle_at_76%_68%,rgba(255,255,255,0.7),transparent_18%)]" />
-      <div className="absolute inset-[8%] rounded-[24px] border border-[#d6e7fa] bg-[linear-gradient(180deg,#f8fcff,#eef6ff)] shadow-inner">
-        <div className="absolute left-[8%] top-[16%] h-[58%] w-[30%] rounded-[45%] bg-[#d9ebff] opacity-70 blur-[1px]" />
-        <div className="absolute left-[41%] top-[18%] h-[56%] w-[28%] rounded-[42%] bg-[#d2e7ff] opacity-90 blur-[1px]" />
-        <div className="absolute left-[62%] top-[22%] h-[42%] w-[18%] rounded-[45%] bg-[#c7def8] opacity-85" />
-        <div className="absolute left-[49%] top-[48%] h-[34%] w-[14%] rounded-[45%] bg-[#c2dbf8] opacity-85" />
-
-        <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-          <path d="M54 66 C58 58, 64 50, 74 34" stroke="#3b82f6" strokeWidth="0.8" fill="none" strokeDasharray="2 1.6" />
-          <path d="M54 66 C55 70, 58 76, 70 80" stroke="#f59e0b" strokeWidth="0.8" fill="none" strokeDasharray="2 1.6" />
-          <path d="M54 66 C48 72, 46 78, 45 84" stroke="#10b981" strokeWidth="0.8" fill="none" strokeDasharray="2 1.6" />
-          <path d="M54 66 C66 58, 76 58, 82 56" stroke="#ef4444" strokeWidth="0.8" fill="none" strokeDasharray="2 1.6" />
-        </svg>
-
-        {markers.map((marker) => (
-          <div
-            key={marker.id}
-            className="absolute -translate-x-1/2 -translate-y-1/2"
-            style={{ left: `${marker.x}%`, top: `${marker.y}%` }}
-            title={`${marker.dest} - ${marker.id}`}
-          >
-            <div className="relative flex flex-col items-center">
-              <div className="h-4 w-4 rounded-full border-2 border-white shadow-md" style={{ backgroundColor: marker.color }} />
-              <div className="mt-1 rounded-md bg-white/90 px-2 py-0.5 text-[10px] font-semibold text-[#35567d] shadow-sm">
-                {marker.dest}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 const deliveryHistoryOptions = {
   responsive: true,
@@ -104,23 +61,28 @@ function DistributorDashboard() {
   const [totals, setTotals] = useState({ totalShipments: 0, inTransit: 0, delivered: 0, pending: 0, tempAlerts: 0 });
   const [deliveryHistory, setDeliveryHistory] = useState(defaultDeliveryHistory);
   const [deliveryLabels, setDeliveryLabels] = useState(defaultLabels);
-  const [markers, setMarkers] = useState([]);
   const [orderNotifications, setOrderNotifications] = useState([]);
   const [approvedOrders, setApprovedOrders] = useState([]);
   const [confirmedDeliveries, setConfirmedDeliveries] = useState([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [pendingAction, setPendingAction] = useState("");
+  const [actionError, setActionError] = useState("");
+  const actionLock = useRef(false);
   const { addToast } = useToast();
   const auditBatchIds = useMemo(
     () => [
       ...shipments.map((shipment) => shipment.id),
-      ...orderNotifications.map((item) => item.auditBatchId),
-      ...approvedOrders.map((item) => item.auditBatchId),
+      ...approvedOrders.map((item) => item.allocatedBatchId),
       ...confirmedDeliveries.map((item) => item.batchId),
     ].filter(Boolean),
-    [shipments, orderNotifications, approvedOrders, confirmedDeliveries]
+    [shipments, approvedOrders, confirmedDeliveries]
   );
 
-  useEffect(() => {
-    const load = async () => {
+  const load = useCallback(async () => {
+      setLoading(true);
+      setLoadError("");
       const [dashboardResult, ordersResult] = await Promise.allSettled([
         fetchDistributorDashboard(),
         fetchDistributorOrders(),
@@ -129,18 +91,16 @@ function DistributorDashboard() {
       if (dashboardResult.status === "fulfilled") {
         const data = dashboardResult.value;
         const shipmentRows = (data.shipments || []).map((shipment) => ({
+          shipmentId: shipment.shipmentId,
           id: shipment.batchId || shipment.shipmentId,
+          workflowStatus: shipment.status || "Pending",
+          held: Boolean(shipment.coldChainHoldAlertIds?.length || /quarantin/i.test(shipment.coldChainStatus || "")),
+          confirmed: Boolean(shipment.hospitalConfirmed),
           type: shipment.vaccineType || "Mixed",
-          qty: shipment.quantity ? shipment.quantity.toLocaleString() : "--",
+          qty: Number(shipment.quantity || 0).toLocaleString(),
           dest: shipment.destination || "N/A",
-          status: shipment.status || "Pending",
+          status: shipment.coldChainStatus || shipment.status || "Pending",
           txHash: shipment.txHash || "pending",
-          statusColor:
-            (shipment.status || "").toLowerCase().includes("transit")
-              ? "bg-blue-100 text-blue-600"
-              : (shipment.status || "").toLowerCase().includes("deliver")
-              ? "bg-teal-100 text-teal-600"
-              : "bg-orange-100 text-orange-600",
         }));
 
         setShipments(shipmentRows);
@@ -160,29 +120,15 @@ function DistributorDashboard() {
         setDeliveryHistory(data.deliveryHistory?.values || defaultDeliveryHistory);
         setDeliveryLabels(data.deliveryHistory?.labels || defaultLabels);
         setConfirmedDeliveries(data.confirmedDeliveries || []);
-        setMarkers(
-          (data.shipments || []).map((shipment) => ({
-            id: shipment.batchId || shipment.shipmentId,
-            dest: shipment.destination,
-            x: destinationCoords[shipment.destination]?.x || 54,
-            y: destinationCoords[shipment.destination]?.y || 66,
-            color:
-              (shipment.status || "").toLowerCase().includes("deliver")
-                ? "#10b981"
-                : (shipment.status || "").toLowerCase().includes("transit")
-                ? "#3b82f6"
-                : "#f59e0b",
-          }))
-        );
       } else {
         setShipments([]);
         setTempLogs([]);
-        setMarkers([]);
         setConfirmedDeliveries([]);
         setTotals({ totalShipments: 0, inTransit: 0, delivered: 0, pending: 0, tempAlerts: 0 });
         setDeliveryHistory(defaultDeliveryHistory);
         setDeliveryLabels(defaultLabels);
         addToast("error", "Distributor dashboard failed to load");
+        setLoadError("Shipment data could not be loaded. Check the backend connection and your signed-in role, then refresh.");
       }
 
       if (ordersResult.status === "fulfilled") {
@@ -192,11 +138,37 @@ function DistributorDashboard() {
         setOrderNotifications([]);
         setApprovedOrders([]);
         addToast("error", "Approved hospital order feed could not be loaded");
+        setLoadError("Some dashboard data could not be loaded. Refresh to retry.");
       }
-    };
-
-    load();
+      setLoading(false);
   }, [addToast]);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const shownShipments = shipments.filter(ship => [ship.shipmentId, ship.id, ship.type, ship.dest, ship.status].join(" ").toLowerCase().includes(search.trim().toLowerCase()));
+  const navigateSection = id => document.getElementById(id)?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  const performAction = async (shipment, action) => {
+    if (actionLock.current) return;
+    actionLock.current = true;
+    setPendingAction(shipment.shipmentId);
+    setActionError("");
+    try {
+      const operation = { verify: verifyShipment, dispatch: dispatchShipment, supply: supplyShipment }[action];
+      const result = await operation(shipment.shipmentId);
+      if (action === "verify" && result.verification?.status !== "Verified") throw new Error("Batch verification is still pending. Review the manufacturer record before dispatch.");
+      addToast("success", `${shipment.shipmentId}: ${action === "verify" ? "verified" : action === "dispatch" ? "dispatched" : "supplied; awaiting hospital receipt"}`);
+      await load();
+    } catch (error) {
+      const message = error.response?.data?.error || error.message || "Shipment action failed.";
+      setActionError(`${message}${!error.response || error.response.status >= 500 ? " Refresh and inspect the shipment history before retrying; the request may have partially completed." : ""}`);
+      addToast("error", message);
+    } finally {
+      actionLock.current = false;
+      setPendingAction("");
+    }
+  };
+  const exportReport = () => downloadOperationalCsv("distributor-shipments.csv", ["Shipment ID", "Batch ID", "Vaccine", "Quantity", "Destination", "Status", "Transaction hash"], shownShipments.map(ship => [ship.shipmentId, ship.id, ship.type, ship.qty, ship.dest, ship.status, ship.txHash]));
 
   const deliveryHistoryData = {
     labels: deliveryLabels,
@@ -212,13 +184,14 @@ function DistributorDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,#eef5fd_0%,#f8fbff_42%,#f4f8fd_100%)] font-sans text-gray-800">
-      <header className="bg-gradient-to-r from-[#103968] via-[#154986] to-[#1f6bbb] text-white flex items-center justify-between px-6 py-3 sticky top-0 z-50 shadow-sm">
+    <div className="dashboard-page min-h-screen bg-[linear-gradient(180deg,#eef5fd_0%,#f8fbff_42%,#f4f8fd_100%)] font-sans text-gray-800">
+      <div className="mx-auto max-w-[1500px] px-5"><ManualReadingEntry /></div>
+      <header className="dashboard-header bg-gradient-to-r from-[#103968] via-[#154986] to-[#1f6bbb] text-white flex items-center justify-between px-6 py-3 sticky top-0 z-50 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="bg-white p-1.5 text-[#153e75] rounded-full shadow-inner">
             <Shield size={24} />
           </div>
-          <h1 className="text-xl font-bold tracking-wide">2026 Smart Vaccine Supply Chain System</h1>
+          <h1 className="text-lg font-bold tracking-wide">Vaccine Supply Chain</h1>
         </div>
 
         <div className="flex items-center gap-6">
@@ -226,59 +199,58 @@ function DistributorDashboard() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
             <input
               type="text"
-              placeholder="Search..."
+              aria-label="Search shipments"
+              placeholder="Search shipments..."
+              value={search}
+              onChange={event => setSearch(event.target.value)}
               className="pl-9 pr-4 py-1.5 rounded-full bg-white/10 border border-white/20 text-sm focus:outline-none focus:bg-white/20 transition-all text-white placeholder-white/60 w-64"
             />
           </div>
-          <div className="relative cursor-pointer">
+          <button type="button" aria-label="View cold-chain alerts" onClick={() => navigateSection("distributor-alerts")} className="relative">
             <Bell size={20} />
             <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center font-bold">{totals.tempAlerts}</div>
-          </div>
+          </button>
           <div className="flex items-center gap-2 text-sm font-medium border-l border-white/20 pl-4">
             <span className="hidden sm:inline">Distributor</span>
             <div className="w-8 h-8 bg-blue-100 text-blue-800 rounded-full flex items-center justify-center">
               <User size={18} />
             </div>
-            <ChevronDown size={16} className="cursor-pointer" />
           </div>
         </div>
       </header>
 
-      <div className="flex">
-        <aside className="w-60 bg-[linear-gradient(180deg,#193f74,#1c4f8b_62%,#1f5c9f)] min-h-[calc(100vh-64px)] text-white/90 shadow-2xl z-40 flex flex-col pt-6 flex-shrink-0">
+      <div className="dashboard-layout flex">
+        <aside className="dashboard-sidebar w-60 bg-[linear-gradient(180deg,#193f74,#1c4f8b_62%,#1f5c9f)] min-h-[calc(100vh-64px)] text-white/90 shadow-2xl z-40 flex flex-col pt-6 flex-shrink-0">
           <div className="mx-3 mb-4 rounded-2xl bg-[#2870c4] px-4 py-4 text-white shadow-lg shadow-blue-900/20">
             <div className="text-xl font-bold leading-tight">Distributor Dashboard</div>
           </div>
 
           <nav className="flex flex-col gap-1 px-3 flex-1">
-            <Link to="#" className="flex items-center gap-3 bg-white text-[#1e4881] px-4 py-3 rounded-xl font-bold shadow-md transform -translate-x-1">
+            <a href="#distributor-overview" className="flex items-center gap-3 bg-white text-[#1e4881] px-4 py-3 rounded-xl font-bold shadow-md">
               <Home size={18} />
               <span>Dashboard</span>
-            </Link>
-            <Link to="#" className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/10 transition-colors font-medium">
+            </a>
+            <a href="#distributor-shipments" className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/10 transition-colors font-medium">
               <Truck size={18} />
               <span>Shipments</span>
-            </Link>
-            <Link to="#" className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/10 transition-colors font-medium">
+            </a>
+            <a href="#distributor-tracking" className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/10 transition-colors font-medium">
               <LogOut size={18} className="rotate-180" />
               <span>Batch Tracking</span>
-            </Link>
-            <Link to="#" className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/10 transition-colors font-medium">
+            </a>
+            <a href="#distributor-temperature" className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/10 transition-colors font-medium">
               <ChartActivity size={18} />
               <span>Temperature Logs</span>
-            </Link>
-            <Link to="#" className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/10 transition-colors font-medium">
+            </a>
+            <a href="#distributor-history" className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/10 transition-colors font-medium">
               <FileText size={18} />
               <span>Delivery History</span>
-            </Link>
-            <Link to="#" className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/10 transition-colors font-medium">
+            </a>
+            <a href="#distributor-reports" className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/10 transition-colors font-medium">
               <Shield size={18} />
               <span>Reports</span>
-            </Link>
-            <Link to="/" className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/10 transition-colors font-medium mt-auto mb-4">
-              <Anchor size={18} />
-              <span>Logout</span>
-            </Link>
+            </a>
+            <LogoutButton className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/10 font-medium mt-auto mb-4" />
           </nav>
 
           <div className="h-52 relative overflow-hidden flex items-end justify-center bg-gradient-to-t from-blue-950/55 to-transparent p-4">
@@ -290,14 +262,17 @@ function DistributorDashboard() {
           </div>
         </aside>
 
-        <main className="flex-1 overflow-x-hidden p-6 lg:p-8">
-          <div className="mx-auto max-w-[1240px]">
-          <div className="flex justify-between items-center mb-6">
+        <main className="dashboard-main min-w-0 flex-1 overflow-x-hidden p-6 lg:p-8">
+          <div className="dashboard-content mx-auto max-w-[1240px]">
+          <div id="distributor-overview" className="flex flex-wrap gap-3 justify-between items-center mb-6 scroll-mt-24">
             <h2 className="text-[1.95rem] text-gray-800 font-bold">Distributor Dashboard</h2>
-            <button className="flex items-center gap-2 text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg font-medium text-sm transition-colors border border-blue-200">
+            <div className="flex flex-wrap gap-2"><button type="button" onClick={load} disabled={loading || Boolean(pendingAction)} className="flex items-center gap-2 rounded-lg border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700 disabled:opacity-50"><RefreshCw size={16} />{loading ? "Refreshing..." : "Refresh dashboard"}</button>
+            <button type="button" onClick={exportReport} disabled={loading || !shownShipments.length} className="flex items-center gap-2 text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg font-medium text-sm transition-colors border border-blue-200 disabled:opacity-50">
               <Download size={16} /> Export Report
-            </button>
+            </button></div>
           </div>
+          {loadError && <p role="alert" className="mb-4 rounded-xl bg-rose-50 p-4 text-rose-700">{loadError}</p>}
+          {actionError && <p role="alert" className="mb-4 rounded-xl bg-rose-50 p-4 text-rose-700">{actionError}</p>}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <div className="bg-white rounded-[14px] p-5 shadow-sm border border-[#e9eff7] flex items-center gap-4">
@@ -342,12 +317,16 @@ function DistributorDashboard() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 mb-6">
-            <div className="xl:col-span-3 bg-white rounded-[14px] shadow-sm border border-[#e9eff7] p-5 flex flex-col">
+          <div id="distributor-tracking" className="mb-6 scroll-mt-24"><LiveShipmentVisualizer compact maxVisible={3} title="Distributor shipment GPS history" /></div>
+
+          <div className="grid grid-cols-1 gap-6 mb-6">
+            <div id="distributor-shipments" className="scroll-mt-24 min-w-0 bg-white rounded-[14px] shadow-sm border border-[#e9eff7] p-5 flex flex-col">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-bold text-gray-800">Current Shipments</h3>
-                <button className="text-blue-600 text-sm font-semibold border border-blue-100 px-3 py-1 rounded hover:bg-blue-50 transition-colors">View All</button>
+                <span className="text-xs text-slate-500">{shownShipments.length} of {shipments.length} shipments</span>
               </div>
+              <label className="mb-4 block text-sm text-slate-600">Filter shipments<input className="mt-1 w-full rounded-lg border border-slate-200 p-2" value={search} onChange={event => setSearch(event.target.value)} placeholder="Shipment, batch, destination or status" /></label>
+              <p className="mb-3 text-xs text-slate-500">Admin-approved orders create assigned shipments. Verify the batch, dispatch it, then supply the hospital. Holds are enforced by the server.</p>
 
               <div className="overflow-x-auto flex-1">
                 <table className="w-full text-sm text-left">
@@ -359,27 +338,29 @@ function DistributorDashboard() {
                       <th className="px-4 py-3 font-semibold">Destination</th>
                       <th className="px-4 py-3 font-semibold text-center">Status</th>
                       <th className="px-4 py-3 font-semibold rounded-tr-lg text-right">Tx Hash</th>
+                      <th className="px-4 py-3 font-semibold">Next action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {shipments.map((ship, idx) => (
-                      <tr key={idx} className="border-b border-gray-50 hover:bg-blue-50/30 transition-colors">
-                        <td className="px-4 py-3 font-medium text-gray-800">{ship.id}</td>
+                    {shownShipments.map((ship) => (
+                      <tr key={ship.shipmentId} className="border-b border-gray-50 hover:bg-blue-50/30 transition-colors">
+                        <td className="px-4 py-3 font-medium text-gray-800">{ship.id}<span className="block text-xs text-slate-500">{ship.shipmentId}</span></td>
                         <td className="px-4 py-3 text-gray-600">{ship.type}</td>
                         <td className="px-4 py-3 font-medium text-gray-700">{ship.qty}</td>
                         <td className="px-4 py-3 text-gray-600">{ship.dest}</td>
                         <td className="px-4 py-3 text-center">
-                          <span className={`px-3 py-1 rounded text-[11px] font-bold uppercase tracking-wide inline-block w-28 ${ship.statusColor}`}>
-                            {ship.status}
-                          </span>
+                          <StatusBadge value={ship.status} />
                         </td>
-                        <td className="px-4 py-3 text-right font-mono text-[10px] text-gray-400">{ship.txHash}</td>
+                        <td className="px-4 py-3 max-w-[130px] break-all text-right font-mono text-xs text-gray-500">{ship.txHash}</td>
+                        <td className="px-4 py-3">
+                          {ship.held ? <span className="text-xs text-rose-700">Quality hold — review required</span> : ship.confirmed || /confirmed/i.test(ship.workflowStatus) ? <span className="text-xs text-emerald-700">Received by hospital</span> : /supplied|delivered/i.test(ship.workflowStatus) ? <span className="text-xs text-slate-600">Awaiting hospital receipt</span> : <button type="button" disabled={Boolean(pendingAction) || loading} onClick={() => performAction(ship, /transit/i.test(ship.workflowStatus) ? "supply" : /verified/i.test(ship.workflowStatus) ? "dispatch" : "verify")} className="whitespace-nowrap rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">{pendingAction === ship.shipmentId ? "Processing..." : /transit/i.test(ship.workflowStatus) ? "Supply hospital" : /verified/i.test(ship.workflowStatus) ? "Dispatch shipment" : "Verify batch"}</button>}
+                        </td>
                       </tr>
                     ))}
-                    {!shipments.length && (
+                    {!shownShipments.length && (
                       <tr>
-                        <td colSpan="6" className="px-4 py-8 text-center text-gray-400">
-                          No shipment data available yet.
+                        <td colSpan="7" className="px-4 py-8 text-center text-gray-400">
+                          {search ? "No shipments match this search." : "No shipment data available yet."}
                         </td>
                       </tr>
                     )}
@@ -388,19 +369,10 @@ function DistributorDashboard() {
               </div>
             </div>
 
-            <div className="xl:col-span-2 bg-white rounded-[14px] shadow-sm border border-[#e9eff7] p-5 flex flex-col">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-gray-800">Shipment Tracking Map</h3>
-                <span className="text-gray-400 cursor-pointer">...</span>
-              </div>
-              <div className="flex-1 rounded-xl overflow-hidden border border-blue-100/50 min-h-[280px] shadow-inner">
-                <TrackingMap markers={markers} />
-              </div>
-            </div>
           </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            <div className="bg-white rounded-[14px] shadow-sm border border-[#e9eff7] p-5">
+            <div id="distributor-orders" className="scroll-mt-24 bg-white rounded-[14px] shadow-sm border border-[#e9eff7] p-5">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-bold text-gray-800">Approved Orders Ready for Distribution</h3>
                 <span className="text-xs font-semibold text-teal-600">{approvedOrders.length} approved</span>
@@ -415,12 +387,10 @@ function DistributorDashboard() {
                           {item.hospital} - {item.region}
                         </p>
                       </div>
-                      <span className="rounded-md bg-teal-100 px-2.5 py-1 text-[11px] font-semibold text-teal-700">
-                        {item.status}
-                      </span>
+                      <StatusBadge value={item.status} />
                     </div>
                     <div className="mt-2 flex flex-wrap gap-3 text-[12px] text-gray-500">
-                      <span>Batch: {item.auditBatchId}</span>
+                      <span>Allocated batch: {item.allocatedBatchId || "See assigned shipment"}</span>
                       <span>Vaccine: {item.vaccineType}</span>
                       <span>Doses: {item.requestedDoses}</span>
                       <span>Risk: {item.riskFlag}</span>
@@ -446,13 +416,11 @@ function DistributorDashboard() {
                         <p className="font-semibold text-gray-800">{item.title}</p>
                         <p className="mt-1 text-sm text-gray-600">{item.message}</p>
                       </div>
-                      <span className="rounded-md bg-blue-100 px-2.5 py-1 text-[11px] font-semibold text-blue-700">
-                        Approved
-                      </span>
+                      <StatusBadge value="Approved" />
                     </div>
                     <div className="mt-2 flex flex-wrap gap-3 text-[12px] text-gray-500">
                       <span>Order: {item.orderId}</span>
-                      <span>Batch: {item.auditBatchId}</span>
+                      <span>Order audit reference: {item.auditBatchId}</span>
                       <span>{new Date(item.createdAt).toLocaleString()}</span>
                     </div>
                   </div>
@@ -465,16 +433,15 @@ function DistributorDashboard() {
               </div>
             </div>
 
-            <div className="bg-white rounded-[14px] shadow-sm border border-[#e9eff7] p-5">
+            <div id="distributor-temperature" className="scroll-mt-24 bg-white rounded-[14px] shadow-sm border border-[#e9eff7] p-5">
               <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center gap-2 text-blue-800">
                   <ChartActivity size={20} />
                   <h3 className="font-bold text-gray-800">Temperature Monitoring</h3>
                 </div>
-                <span className="text-gray-400 cursor-pointer">...</span>
               </div>
               <p className="text-xs font-bold text-gray-500 flex items-center gap-2 mb-3 px-2 uppercase tracking-wide">
-                <AlertTriangle size={12} /> Temperature Logs (24/7)
+                <AlertTriangle size={12} /> Latest stored temperature readings
               </p>
 
               <div className="space-y-3">
@@ -484,9 +451,7 @@ function DistributorDashboard() {
                     <div className={`${log.bg} text-white font-bold text-xs px-4 py-1.5 rounded w-36 text-center shadow-sm whitespace-nowrap`}>
                       {log.range}
                     </div>
-                    <span className={`text-xs font-bold px-3 py-1 rounded w-20 text-center ${log.badge}`}>
-                      {log.status}
-                    </span>
+                    <StatusBadge value={log.status} />
                   </div>
                 ))}
                 {!tempLogs.length && (
@@ -497,13 +462,12 @@ function DistributorDashboard() {
               </div>
             </div>
 
-            <div className="bg-white rounded-[14px] shadow-sm border border-[#e9eff7] p-5 flex flex-col">
+            <div id="distributor-history" className="scroll-mt-24 bg-white rounded-[14px] shadow-sm border border-[#e9eff7] p-5 flex flex-col">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-bold text-gray-800 flex items-center gap-2 text-base">
                   <span className="w-1 h-4 bg-green-500 inline-block rounded"></span>
-                  Delivery History <span className="text-gray-400 font-normal text-sm ml-1">(Last 7 Days)</span>
+                  Shipment Activity <span className="text-gray-400 font-normal text-sm ml-1">(Last 7 Days)</span>
                 </h3>
-                <span className="text-gray-400 cursor-pointer">...</span>
               </div>
               <div className="flex-1 min-h-[160px] w-full mt-2">
                 <Bar data={deliveryHistoryData} options={deliveryHistoryOptions} />
@@ -525,9 +489,7 @@ function DistributorDashboard() {
                           {item.destination} confirmed batch {item.batchId}
                         </p>
                       </div>
-                      <span className="rounded-md bg-teal-100 px-2.5 py-1 text-[11px] font-semibold text-teal-700">
-                        {item.status}
-                      </span>
+                      <StatusBadge value={item.status} />
                     </div>
                     <div className="mt-2 flex flex-wrap gap-3 text-[12px] text-gray-500">
                       <span>{item.vaccineType} - {item.quantity} doses</span>
@@ -548,7 +510,9 @@ function DistributorDashboard() {
             </div>
           </div>
 
-          <div className="mt-6">
+          <div id="distributor-alerts" className="scroll-mt-24"><TemperatureAlertPanel role="distributor" /></div>
+          <div id="shipment-journey"><TraceabilityPanel /></div>
+          <div id="distributor-reports" className="mt-6 scroll-mt-24">
             <BlockchainLog
               title="Distributor Blockchain Audit"
               batchIds={auditBatchIds}

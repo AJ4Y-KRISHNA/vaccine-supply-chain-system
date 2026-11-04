@@ -1,0 +1,204 @@
+const mongoose = require("mongoose");
+const Batch = require("../models/Batch");
+const Shipment = require("../models/Shipment");
+const Alert = require("../models/TemperatureAlert");
+const Log = require("../models/TemperatureLog");
+const Notification = require("../models/Notification");
+const State = require("../models/TelemetryState");
+const Audit = require("../models/ColdChainAudit");
+const Policy = require("../models/ColdChainPolicy");
+const { persistSimulationReading, persistTemperatureLogs } = require("../services/telemetryService");
+const { evaluateTemperature, evaluateReading, checkMissingTelemetry } = require("../services/temperatureAlertService");
+const { connect, close, fixture } = require("./helpers/coldChainFixture");
+beforeAll(connect, 15000);
+afterAll(close);
+
+test("temperature thresholds are policy-specific; magnitude alone never establishes sustained exposure", () => {
+  const policy = { minimumTemperature: -20, maximumTemperature: -10 };
+  expect(evaluateTemperature({ temperature: -15, policy }).violationType).toBe("NORMAL");
+  expect(evaluateTemperature({ temperature: 5, policy })).toMatchObject({ violationType: "HIGH_TEMPERATURE", deviation: 15, severity: "WARNING" });
+});
+test("legacy limits do not masquerade as an approved policy", async () => {
+  const f = await fixture({ approved: false });
+  expect(await evaluateReading(f.reading(20))).toMatchObject({ evaluated: false, policyStatus: "POLICY_NOT_APPROVED" });
+  expect(await Alert.countDocuments({ batchId: f.batchId })).toBe(0);
+});
+test("a normal reading is recorded without an alert or notification", async () => {
+  const f = await fixture();
+  const log = await persistSimulationReading(f.reading(5));
+  expect(log.status).toBe("Normal");
+  expect(log.evaluation).toMatchObject({ evaluated: true, severity: "NORMAL", recommendedAction: "RECORD_NORMAL" });
+  expect(await Notification.countDocuments({ auditBatchId: f.batchId })).toBe(0);
+});
+test("brief excursions request a reading, deduplicate notifications, and recover without quarantine", async () => {
+  const f = await fixture();
+  await evaluateReading(f.reading(10, 0));
+  await evaluateReading(f.reading(10, 1));
+  expect(await Alert.countDocuments({ batchId: f.batchId })).toBe(1);
+  expect(await Notification.countDocuments({ auditBatchId: f.batchId })).toBe(4);
+  expect(await Notification.distinct("recipientRole", { auditBatchId: f.batchId })).toEqual(expect.arrayContaining(["admin", "manufacturer", "distributor", "healthcare"]));
+  const normal = await evaluateReading(f.reading(5, 2));
+  expect(normal.batchQuarantined).toBe(false);
+  expect(await Alert.findOne({ batchId: f.batchId }).lean()).toMatchObject({ phase: "RECOVERED", status: "RESOLVED" });
+});
+test("advisory anomaly evidence is attached to a policy alert without changing rule authority", async () => {
+  const f = await fixture();
+  const anomalyInference = { status: "ANOMALY", model: "rolling_median_mad_v1", advisory_only: true,
+    reason: "Temperature differs substantially from this sensor's prior baseline." };
+  const result = await evaluateReading({ ...f.reading(10), anomalyInference });
+  expect(result).toMatchObject({ evaluated: true, violationType: "HIGH_TEMPERATURE", severity: "WARNING", batchQuarantined: false });
+  const alert = await Alert.findOne({ batchId: f.batchId }).lean();
+  expect(alert.context.anomalyInference).toEqual({ status: "ANOMALY", model: "rolling_median_mad_v1", advisoryOnly: true,
+    reason: anomalyInference.reason, trend: null });
+});
+test("a statistical pre-limit trend creates a review alert and notification without automatically holding stock", async () => {
+  const f = await fixture();
+  const trend = { status: "PROJECTED_LIMIT_CROSSING", slope_c_per_minute: 0.12, projected_temperature_c: 8.52,
+    boundary_c: 8, minutes_to_cross: 10.7, horizon_minutes: 15,
+    reason: "Temperature is rising at +0.12°C/min; the current 6.72°C reading is within the configured 2–8°C range, but the timestamped trend projects crossing 8°C in about 10.7 minutes." };
+  const result = await evaluateReading({ ...f.reading(6.72), anomalyInference: {
+    is_anomaly: true, status: "ANOMALY", model: "rolling_median_mad_v1", reason: trend.reason, trend,
+  } });
+  const alert = await Alert.findOne({ batchId: f.batchId, metric: "STATISTICAL_ANOMALY" }).lean();
+
+  expect(result).toMatchObject({ severity: "WARNING", batchQuarantined: false, recommendedAction: "REQUEST_READING" });
+  expect(result.reasons.join(" ")).toContain("crossing 8°C");
+  expect(alert).toMatchObject({ metric: "STATISTICAL_ANOMALY", violationType: "STATISTICAL_TREND_ANOMALY",
+    severity: "WARNING", phase: "REVIEW_REQUIRED", requiresQualityReview: false, breachedLimit: 8 });
+  expect(alert.reason).toContain("crossing 8°C");
+  expect(alert.recommendedAction).toContain("does not place a cold-chain hold");
+  expect(alert.context.anomalyInference.trend).toMatchObject({ status: "PROJECTED_LIMIT_CROSSING", boundary_c: 8 });
+  expect((await Batch.findOne({ batchId: f.batchId })).coldChainHoldAlertIds || []).toHaveLength(0);
+  expect(await Notification.countDocuments({ alertId: alert.alertId })).toBeGreaterThan(0);
+});
+test.each([10.8, 0])("sustained %s°C excursions hold the batch and all its shipments; recovery does not release", async temperature => {
+  const f = await fixture();
+  await Shipment.create({ shipmentId: `${f.shipmentId}-2`, batchId: f.batchId, distributor: "dist-b", destination: "hospital-b" });
+  for (let minute = 0; minute <= 2; minute++) await evaluateReading(f.reading(temperature, minute));
+  const alert = await Alert.findOne({ batchId: f.batchId }).lean();
+  expect(alert).toMatchObject({ severity: "CRITICAL", phase: "QUARANTINED", requiresQualityReview: true, excursionDurationMs: 120000 });
+  expect(alert.reason).toContain("2 consecutive measured minutes");
+  expect((await Batch.findOne({ batchId: f.batchId })).coldChainHoldAlertIds).toContain(alert.alertId);
+  expect(await Shipment.countDocuments({ batchId: f.batchId, coldChainHoldAlertIds: alert.alertId })).toBe(2);
+  expect(await Notification.distinct("recipientRole", { auditBatchId: f.batchId })).toEqual(expect.arrayContaining(["admin", "manufacturer", "distributor", "healthcare"]));
+  const normal = await evaluateReading(f.reading(5, 3));
+  expect(normal).toMatchObject({ severity: "NORMAL", batchQuarantined: true, recommendedAction: "QUARANTINE_PENDING_REVIEW" });
+  expect(await Alert.findOne({ alertId: alert.alertId }).lean()).toMatchObject({ requiresQualityReview: true, phase: "QUARANTINED" });
+});
+test("the supplied explanation example is reproducible at exactly 18 minutes", async () => {
+  const f = await fixture({ policy: { excursionDurationMs: 18 * 60000 } });
+  for (let minute = 0; minute <= 18; minute++) await evaluateReading(f.reading(10.8, minute));
+  const alert = await Alert.findOne({ batchId: f.batchId }).lean();
+  expect(alert.reason).toBe("Critical: 10.8°C is 2.8°C above the approved maximum of 8°C for 18 consecutive measured minutes.");
+});
+test("gaps and direction changes restart continuous exposure instead of inventing a sustained event", async () => {
+  const f = await fixture();
+  await evaluateReading(f.reading(10, 0));
+  const gap = await evaluateReading(f.reading(10, 3));
+  expect(gap.batchQuarantined).toBe(false);
+  expect(gap.confidence).toBe("LIMITED");
+  expect(gap.reasons.join(" ")).toContain("continuous exposure is unknown");
+  await evaluateReading(f.reading(0, 4));
+  const active = await Alert.findOne({ batchId: f.batchId, violationType: "LOW_TEMPERATURE", activeExcursionKey: { $exists: true } });
+  expect(active.excursionDurationMs).toBe(0);
+  expect(active.excursionStartedAt.toISOString()).toBe(f.at(4));
+});
+test("duplicate/out-of-order readings cannot roll back or release a hold", async () => {
+  const f = await fixture();
+  await Promise.all([evaluateReading(f.reading(10)), evaluateReading(f.reading(10))]);
+  for (let minute = 1; minute <= 2; minute++) await evaluateReading(f.reading(10, minute));
+  expect(await evaluateReading(f.reading(5, 0))).toMatchObject({ evaluated: false, policyStatus: "STALE_OR_DUPLICATE_READING" });
+  expect(await Alert.countDocuments({ batchId: f.batchId })).toBe(1);
+  expect((await Batch.findOne({ batchId: f.batchId })).coldChainHoldAlertIds).toHaveLength(1);
+});
+test("humidity, critically low battery, and rate-of-change produce exact reliability reasons", async () => {
+  const f = await fixture({ policy: { maximumRateCelsiusPerMinute: 1 } });
+  await evaluateReading(f.reading(5));
+  const result = await evaluateReading(f.reading(7, 1, { humidity: 90, batteryLevel: 2 }));
+  expect(result).toMatchObject({ severity: "WARNING", confidence: "LIMITED", batchQuarantined: false });
+  expect(result.reasons.join(" ")).toMatch(/Humidity 90%/);
+  expect(result.reasons.join(" ")).toMatch(/Battery 2%/);
+  expect(result.reasons.join(" ")).toMatch(/2°C\/min/);
+  expect(await Alert.countDocuments({ batchId: f.batchId })).toBe(2);
+});
+test.each([
+  { humidity: 35, type: "LOW_HUMIDITY", limit: 40 },
+  { humidity: 85, type: "HIGH_HUMIDITY", limit: 80 },
+])("brief humidity excursion ($type) is review-only and carries its policy evidence", async ({ humidity, type, limit }) => {
+  const f = await fixture({ policy: { excursionDurationMs: 120000 } });
+  await evaluateReading(f.reading(5, 0, { humidity }));
+  const result = await evaluateReading(f.reading(5, 1, { humidity }));
+  const alert = await Alert.findOne({ batchId: f.batchId, violationType: type }).lean();
+  expect(result).toMatchObject({ severity: "WARNING", batchQuarantined: false, recommendedAction: "REQUEST_READING" });
+  expect(alert).toMatchObject({ batchId: f.batchId, shipmentId: f.shipmentId, vaccineType: "Synthetic vaccine",
+    metric: "HUMIDITY", violationType: type, breachedLimit: limit, severity: "WARNING", excursionDurationMs: 60000,
+    currentHumidity: humidity, currentReading: { humidity, temperature: 5 }, phase: "REVIEW_REQUIRED", requiresQualityReview: false });
+  expect((await Batch.findOne({ batchId: f.batchId })).coldChainHoldAlertIds || []).toHaveLength(0);
+});
+test("sustained low humidity reaches the policy duration and quarantines the batch for quality review", async () => {
+  const f = await fixture({ policy: { excursionDurationMs: 120000 } });
+  for (let minute = 0; minute <= 2; minute++) await evaluateReading(f.reading(5, minute, { humidity: 30 }));
+  const alert = await Alert.findOne({ batchId: f.batchId, violationType: "LOW_HUMIDITY" }).lean();
+  expect(alert).toMatchObject({ shipmentId: f.shipmentId, batchId: f.batchId, vaccineType: "Synthetic vaccine",
+    metric: "HUMIDITY", currentReading: { humidity: 30, temperature: 5 }, breachedLimit: 40,
+    severity: "CRITICAL", excursionDurationMs: 120000, phase: "QUARANTINED", requiresQualityReview: true });
+  expect(alert.reason).toContain("Humidity 30% is 10% below the approved minimum of 40% for 2 consecutive measured minutes.");
+  expect((await Batch.findOne({ batchId: f.batchId })).coldChainHoldAlertIds).toContain(alert.alertId);
+  expect((await Shipment.findOne({ shipmentId: f.shipmentId })).coldChainHoldAlertIds).toContain(alert.alertId);
+});
+test("in-range humidity creates no humidity alert", async () => {
+  const f = await fixture();
+  const result = await evaluateReading(f.reading(5, 0, { humidity: 55 }));
+  expect(result).toMatchObject({ severity: "NORMAL", batchQuarantined: false, recommendedAction: "RECORD_NORMAL" });
+  expect(await Alert.countDocuments({ batchId: f.batchId, metric: "HUMIDITY" })).toBe(0);
+});
+test("legacy policies without both humidity limits skip humidity evaluation without crashing", async () => {
+  const f = await fixture({ policy: { minimumHumidity: undefined, maximumHumidity: undefined } });
+  const result = await evaluateReading(f.reading(5, 0, { humidity: 99 }));
+  expect(result).toMatchObject({ evaluated: true, severity: "NORMAL", batchQuarantined: false });
+  expect(await Alert.countDocuments({ batchId: f.batchId, metric: "HUMIDITY" })).toBe(0);
+});
+test("explicit simulation-clock checks detect silence and are idempotent; late data cannot erase silence", async () => {
+  const f = await fixture();
+  await evaluateReading(f.reading(5));
+  expect(await checkMissingTelemetry(f.batchId, f.at(3))).toHaveLength(1);
+  expect(await checkMissingTelemetry(f.batchId, f.at(3))).toHaveLength(0);
+  expect(await evaluateReading(f.reading(5, 1))).toMatchObject({ evaluated: false });
+  const alert = await Alert.findOne({ batchId: f.batchId, violationType: "TELEMETRY_RELIABILITY" });
+  expect(await Alert.countDocuments({ batchId: f.batchId, violationType: "TELEMETRY_RELIABILITY" })).toBe(1);
+  expect((await Notification.findOne({ alertId: alert.alertId })).metadata.sourceLabel).toBe("Temperature ingestion");
+  expect((await State.findOne({ batchId: f.batchId })).checkedAt.toISOString()).toBe(f.at(3));
+});
+test("expected-device silence alerts are labeled as automatic simulator events", async () => {
+  const f = await fixture();
+  const [alert] = await checkMissingTelemetry(f.batchId, f.at(3), {
+    deviceId: "EXPECTED-DEVICE", shipmentId: f.shipmentId, expectedSince: f.at(0),
+  });
+  expect(alert.context.source).toBe("software-iot-simulator");
+  expect((await Notification.findOne({ alertId: alert.alertId })).metadata.sourceLabel).toBe("Automatic simulator");
+});
+test("ingestion of one stream checks for missing peer streams using the same event clock", async () => {
+  const f = await fixture();
+  await persistSimulationReading(f.reading(5, 0, { deviceId: "silent" }));
+  await persistSimulationReading(f.reading(5, 0, { deviceId: "active" }));
+  await persistSimulationReading(f.reading(5, 1, { deviceId: "active" }));
+  await persistSimulationReading(f.reading(5, 2, { deviceId: "active" }));
+  expect(await Alert.findOne({ batchId: f.batchId, deviceId: "silent" }).lean()).toMatchObject({ phase: "RELIABILITY_ISSUE" });
+});
+test("legacy ingestion fields remain optional and unapproved raw status is preserved", async () => {
+  const [log] = await persistTemperatureLogs([{ temperature: 5, sensorId: "legacy", status: "Alert" }]);
+  expect(log.status).toBe("Alert");
+  expect(log.evaluation.evaluated).toBe(false);
+  expect(await Log.findById(log._id)).not.toBeNull();
+});
+test("policy and audit revisions reject model-level updates, deletes and bulk updates", async () => {
+  const f = await fixture();
+  const record = await Audit.create({ batchId: f.batchId, action: "TEST", actorId: String(f.reviewer._id), reason: "Fixture", eventTime: new Date() });
+  await expect(Audit.updateOne({ _id: record._id }, { reason: "rewrite" })).rejects.toThrow("Append-only");
+  await expect(record.deleteOne()).rejects.toThrow("Append-only");
+  await expect(Audit.bulkWrite([{ updateOne: { filter: { _id: record._id }, update: { reason: "rewrite" } } }])).rejects.toThrow("Append-only");
+  f.policy.minimumTemperature = -99;
+  await expect(f.policy.save()).rejects.toThrow("Append-only");
+  await expect(Policy.deleteMany({ _id: f.policy._id })).rejects.toThrow("Append-only");
+  expect(await Audit.findById(record._id)).not.toBeNull();
+});

@@ -1,0 +1,112 @@
+name: vaccine-supply-chain-test
+
+# Isolated Jest dependencies. This project has its own network and does not
+# attach to the demo Compose project or its worker/database volumes.
+services:
+  mongo-test:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs-test", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27019:27017"
+    tmpfs:
+      - /data/db:size=1g
+      - /data/configdb:size=128m
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - mongodb://127.0.0.1:27017/admin
+        - --eval
+        - >-
+          try { if (!rs.status().ok) quit(1); }
+          catch(e) { rs.initiate({_id:'rs-test',members:[{_id:0,host:'mongo-test:27017'}]}); quit(1); }
+          if (!db.hello().isWritablePrimary) quit(1);
+      interval: 10s
+      timeout: 30s
+      retries: 30
+      start_period: 5s
+
+  redis-test:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  mosquitto-test:
+    image: eclipse-mosquitto:2
+    ports:
+      - "127.0.0.1:1884:1883"
+    volumes:
+      - ./docker/test-mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -p 1883 -t test/health -C 1 -W 2 >/dev/null 2>&1 & mosquitto_pub -h 127.0.0.1 -p 1883 -t test/health -m ok; wait $!" ]
+      interval: 5s
+      timeout: 4s
+      retries: 10
+
+  hardhat-test:
+    build:
+      context: ./blockchain
+    ports:
+      - "127.0.0.1:18545:8545"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8545',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'eth_chainId',params:[]})}).then(r=>r.json()).then(j=>process.exit(j.result==='0x7a69'?0:1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+
+  ai-test:
+    build:
+      context: ./ai-services
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/openapi.json', timeout=2)"]
+      interval: 3s
+      timeout: 4s
+      retries: 30
+      start_period: 10s
+
+  test-runner:
+    image: node:20-alpine
+    working_dir: /workspace/backend
+    command: ["node", "node_modules/jest/bin/jest.js", "--runInBand", "--testTimeout=180000"]
+    environment:
+      NODE_ENV: test
+      EVENT_BACKBONE_ENABLED: "false"
+      AI_BASE_URL: http://ai-test:8000
+      AI_ANOMALY_TIMEOUT_MS: "750"
+      SIMULATOR_HTTP_TIMEOUT_MS: "20000"
+      MONGO_TEST_URI: mongodb://mongo-test:27017/?replicaSet=rs-test
+      REDIS_HOST: redis-test
+      REDIS_PORT: "6379"
+      MQTT_URL: mqtt://mosquitto-test:1883
+      SIMULATOR_TRANSPORT: http
+      RPC_URL: http://hardhat-test:8545
+      CONTRACT_ADDRESS: 0x5FbDB2315678afecb367f032d93F642f64180aa3
+      MERKLE_CONTRACT_ADDRESS: 0x5FbDB2315678afecb367f032d93F642f64180aa3
+      DOCKER_INTERNAL_HOSTS: mongo-test,redis-test,mosquitto-test,hardhat-test,ai-test
+    volumes:
+      - ./backend:/workspace/backend
+      - ./backend/node_modules:/workspace/backend/node_modules:ro
+      - ./blockchain:/workspace/blockchain:ro
+    depends_on:
+      mongo-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+      mosquitto-test:
+        condition: service_healthy
+      hardhat-test:
+        condition: service_healthy
+      ai-test:
+        condition: service_healthy
+
+networks:
+  default:
+    name: vaccine-supply-chain-test-net

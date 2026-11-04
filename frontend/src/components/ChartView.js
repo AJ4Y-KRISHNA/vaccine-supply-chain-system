@@ -1,21 +1,9 @@
 import React from "react";
-import { Bar } from "react-chartjs-2";
+import DistributionDecisionChart from "./DistributionDecisionChart";
 
-export default function ChartView() {
-  const data = {
-    labels: ["Demand", "Supply"],
-    datasets: [
-      {
-        label: "Distribution",
-        data: [15000, 16500]
-      }
-    ]
-  };
-
-  return (
-    <div>
-      <h2>📊 Analytics</h2>
-      <Bar data={data} />
-    </div>
-  );
+export default function ChartView({ decision }) {
+  return <section className="rounded-xl border bg-white p-5">
+    <h2 className="mb-3 text-lg font-semibold">Distribution planning analytics</h2>
+    <DistributionDecisionChart decision={decision} />
+  </section>;
 }

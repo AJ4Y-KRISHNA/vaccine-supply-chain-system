@@ -1,36 +1,52 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
-from forecasting.cnn_lstm_model import VaccineDemandForecast
-from ingestion.data_loader import load_demand_series
+from pydantic import Field
+from typing import Dict, List, Literal, Optional
+from forecasting.baselines import forecast
+from ingestion.demand_dataset import load_dataset
 
 router = APIRouter()
 
-model = VaccineDemandForecast()
-
 async def get_forecast_internal(vaccination_data: List[float]):
-    model.train(vaccination_data)
-    prediction = model.predict(vaccination_data)
-    return {"demand": prediction}
+    result = forecast(vaccination_data)
+    return {"demand": result["predicted_demand"], **result}
 
 # Request Schema
+class ForecastSupplyContext(BaseModel):
+    status: Literal["available"]
+    scope: str
+    vaccine_type: Optional[str] = None
+    total_unallocated_stock_doses: int = Field(ge=0)
+    current_available_stock_doses: int = Field(ge=0)
+    active_quarantine_batch_count: int = Field(ge=0)
+    quarantined_unallocated_doses: int = Field(ge=0)
+    unavailable_unallocated_stock_doses: int = Field(ge=0)
+    captured_at: Optional[str] = None
+
+
 class ForecastRequest(BaseModel):
     vaccination_data: Optional[List[float]] = None
+    provenance: Optional[Dict] = None
     source_csv: Optional[str] = None
     months: Optional[int] = 12
+    horizon: int = Field(default=6, ge=1, le=24)
+    supply_context: Optional[ForecastSupplyContext] = None
+
+
+def _supply_context_dict(context):
+    if context is None:
+        return None
+    return context.model_dump() if hasattr(context, "model_dump") else context.dict()
 
 # API Endpoint
 @router.post("/forecast")
 async def forecast_demand(data: ForecastRequest):
     try:
-        series = data.vaccination_data or load_demand_series(
-            source_path=data.source_csv,
-            n_months=data.months or 12,
-        )
-        res = await get_forecast_internal(series)
-        return {
-            "predicted_demand": res["demand"],
-            "series_used": series[-10:],  # return tail for debugging
-        }
+        if data.vaccination_data is not None:
+            context = _supply_context_dict(data.supply_context)
+            return forecast(data.vaccination_data, data.provenance, context, data.horizon)
+        series, provenance = load_dataset(data.source_csv, data.months or 12)
+        context = _supply_context_dict(data.supply_context)
+        return forecast(series, provenance, context, data.horizon)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))

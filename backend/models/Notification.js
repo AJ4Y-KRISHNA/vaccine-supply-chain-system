@@ -8,6 +8,17 @@ const notificationSchema = new mongoose.Schema(
       index: true,
     },
     recipientRef: String,
+    recipientRefKey: String,
+    alertId: {
+      type: String,
+      index: true,
+    },
+    correlationId: { type: String, maxlength: 128, index: true },
+    deduplicationKey: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
     orderId: String,
     auditBatchId: String,
     title: String,
@@ -21,6 +32,11 @@ const notificationSchema = new mongoose.Schema(
       default: false,
     },
     metadata: mongoose.Schema.Types.Mixed,
+    emailPreviewLinks: [{
+      url: { type: String, required: true },
+      transportMode: { type: String, enum: ["ethereal"] },
+      capturedAt: { type: Date, default: Date.now },
+    }],
   },
   { timestamps: true }
 );
