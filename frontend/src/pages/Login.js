@@ -83,10 +83,15 @@ function Login() {
 
       <div className="max-w-5xl w-full bg-white/80 backdrop-blur-md rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-white p-6 relative z-10">
         <div className="text-center mb-8">
-          <div className="bg-[#7e42b5] text-white py-3 px-6 rounded-full inline-block shadow-md">
-            <h1 className="text-xl md:text-2xl font-bold tracking-wide">Blockchain-Enabled Vaccine Supply Chain Management System</h1>
+          <div className="inline-flex flex-col items-center">
+            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-[#7e42b5]">SmartVax</h1>
+            <p className="mt-2 text-base md:text-lg font-semibold tracking-wide text-slate-800">
+              Intelligent Vaccine Cold-Chain Monitoring &amp; Supply Management
+            </p>
           </div>
-          <p className="text-gray-600 mt-4 text-base md:text-lg font-medium">Secure Vaccine Distribution Using AI and Blockchain</p>
+          <p className="text-gray-600 mt-3 text-sm md:text-base font-medium">
+            Secure, traceable operations for a software-only demonstration
+          </p>
         </div>
 
         <div className="flex flex-col md:flex-row gap-8 items-center bg-gray-50/50 rounded-2xl p-6 border border-gray-100">

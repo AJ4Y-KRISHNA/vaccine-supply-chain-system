@@ -1,0 +1,252 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1460" viewBox="0 0 1920 1460" role="img" aria-labelledby="title desc">
+  <title id="title">Vaccine Supply Chain System — Data Flow</title>
+  <desc id="desc">A project architecture diagram showing synthetic and manual telemetry flowing through the edge gateway, API, Redis streams and four backend worker consumer groups, then to MongoDB, notifications, local Hardhat blockchain evidence, dashboards, QR verification and supply planning.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f7f9fd"/><stop offset="1" stop-color="#edf3fb"/></linearGradient>
+    <linearGradient id="header" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#102a43"/><stop offset="1" stop-color="#173f5f"/></linearGradient>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="140%"><feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#17324d" flood-opacity=".10"/></filter>
+    <marker id="arrow" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto"><path d="M1 1L10 5.5 1 10" fill="none" stroke="#53718e" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>
+    <marker id="arrowBlue" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto"><path d="M1 1L10 5.5 1 10" fill="none" stroke="#2878b9" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>
+    <style>
+      text{font-family:Inter,"Segoe UI",Arial,sans-serif;fill:#18344e}
+      .title{font-size:34px;font-weight:750;letter-spacing:.4px;fill:#fff}
+      .subtitle{font-size:16px;fill:#c7d8e7}
+      .eyebrow{font-size:12px;font-weight:750;letter-spacing:1.5px;fill:#62809b}
+      .step{font-size:12px;font-weight:750;letter-spacing:1.1px;fill:#2878b9}
+      .card{fill:#fff;stroke:#d9e3ed;stroke-width:1.2;rx:16;filter:url(#shadow)}
+      .cardTitle{font-size:17px;font-weight:700;fill:#16334d}
+      .body{font-size:13px;fill:#536c83}
+      .small{font-size:11.5px;fill:#647d93}
+      .tiny{font-size:10.5px;fill:#6d8295}
+      .badgeText{font-size:12px;font-weight:700;fill:#f3f7fb}
+      .pill{font-size:10.5px;font-weight:700}
+      .arrowline{fill:none;stroke:#53718e;stroke-width:2;marker-end:url(#arrow);stroke-linecap:round;stroke-linejoin:round}
+      .blueLine{fill:none;stroke:#2878b9;stroke-width:2;marker-end:url(#arrowBlue);stroke-linecap:round;stroke-linejoin:round}
+      .dash{stroke-dasharray:5 5}
+    </style>
+  </defs>
+  <rect width="1920" height="1460" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1920" height="128" fill="url(#header)"/>
+  <text x="64" y="55" class="title">VACCINE SUPPLY CHAIN SYSTEM</text>
+  <text x="66" y="86" class="subtitle">How telemetry, operational rules and audit evidence move through the platform</text>
+  <rect x="1578" y="35" width="278" height="42" rx="21" fill="#204d6b" stroke="#56809c"/>
+  <circle cx="1602" cy="56" r="5" fill="#f2b84b"/>
+  <text x="1616" y="60" class="badgeText">SOFTWARE SIMULATION · SYNTHETIC DATA</text>
+
+  <text x="66" y="164" class="step">01  INGESTION — DEVICE DATA ENTERS THE EVENT PIPELINE</text>
+
+  <!-- Sources -->
+  <rect x="64" y="184" width="306" height="238" class="card"/>
+  <text x="88" y="215" class="eyebrow">DATA SOURCES</text>
+  <circle cx="106" cy="260" r="18" fill="#e4f2fb"/>
+  <path d="M101 249h10v17a5 5 0 0 1-10 0z M104 245h4v4h-4 M103 260h6" fill="none" stroke="#2878b9" stroke-width="2" stroke-linecap="round"/>
+  <text x="136" y="256" class="cardTitle">IoT simulator</text>
+  <text x="136" y="277" class="body">Temperature · humidity · GPS · battery</text>
+  <text x="136" y="296" class="small">Synthetic device, vehicle, batch and time</text>
+  <line x1="88" y1="315" x2="346" y2="315" stroke="#e6edf4"/>
+  <circle cx="106" cy="351" r="18" fill="#edf5ee"/>
+  <path d="M98 344h16v15H98z M101 340h10v4h-10 M102 349h8 M102 353h6" fill="none" stroke="#39805f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="136" y="347" class="cardTitle">Manual / CSV entry</text>
+  <text x="136" y="368" class="body">Readings, actor, source and note</text>
+  <text x="88" y="399" class="tiny">Both paths join the same validation and processing flow.</text>
+
+  <!-- Edge gateway -->
+  <rect x="414" y="184" width="312" height="238" class="card"/>
+  <circle cx="446" cy="216" r="15" fill="#e7f2fc"/>
+  <path d="M438 211h16v10h-16z M441 214h2 M445 214h2 M449 214h2 M442 225v4 M450 225v4 M439 229h14" fill="none" stroke="#2878b9" stroke-width="1.6" stroke-linecap="round"/>
+  <text x="470" y="222" class="cardTitle">Edge Gateway</text>
+  <text x="438" y="257" class="body">Authenticate and validate device payload</text>
+  <text x="438" y="280" class="body">Buffer locally; forward in sequence</text>
+  <text x="438" y="303" class="body">EWMA, rate and local 2–8 °C signal</text>
+  <rect x="438" y="330" width="116" height="25" rx="12" fill="#e7f2fc"/>
+  <text x="454" y="347" class="pill" fill="#2878b9">MQTT · QoS 1</text>
+  <rect x="562" y="330" width="139" height="25" rx="12" fill="#f0f4f8"/>
+  <text x="577" y="347" class="pill" fill="#587087">HTTP fallback</text>
+  <text x="438" y="390" class="tiny">Local signal is separate from backend-approved policy.</text>
+
+  <!-- API -->
+  <rect x="770" y="184" width="270" height="238" class="card"/>
+  <circle cx="802" cy="216" r="15" fill="#e9effb"/>
+  <path d="M796 210h12v12h-12z M799 214h6 M799 217h6 M799 220h4" fill="none" stroke="#536db2" stroke-width="1.6" stroke-linecap="round"/>
+  <text x="826" y="222" class="cardTitle">Backend API</text>
+  <text x="794" y="258" class="body">Shared schema validation</text>
+  <text x="794" y="281" class="body">Device / sequence deduplication</text>
+  <text x="794" y="304" class="body">Attach event + correlation IDs</text>
+  <rect x="794" y="330" width="220" height="38" rx="10" fill="#f1f5fa"/>
+  <text x="809" y="346" class="small" font-weight="700">Accepted → queued receipt</text>
+  <text x="809" y="361" class="tiny">Not a completed evaluation</text>
+  <text x="794" y="397" class="tiny">REST / WebSocket serves authorized clients.</text>
+
+  <!-- Redis -->
+  <rect x="1084" y="184" width="278" height="238" class="card"/>
+  <circle cx="1116" cy="216" r="15" fill="#fcefeb"/>
+  <path d="M1108 212l8-4 8 4-8 4z M1108 217l8 4 8-4 M1108 222l8 4 8-4" fill="none" stroke="#c66a50" stroke-width="1.7" stroke-linejoin="round"/>
+  <text x="1140" y="222" class="cardTitle">Redis Streams</text>
+  <text x="1108" y="258" class="body">telemetry.accepted</text>
+  <text x="1108" y="281" class="body">Consumer groups track progress</text>
+  <text x="1108" y="304" class="body">Retry, replay and dead-letter path</text>
+  <rect x="1108" y="330" width="226" height="38" rx="10" fill="#fff4ed"/>
+  <text x="1123" y="346" class="small" font-weight="700" fill="#a9553b">At-least-once delivery</text>
+  <text x="1123" y="361" class="tiny">Replay deduplication via receipts</text>
+  <text x="1108" y="397" class="tiny">Stream mode is enabled by local Compose.</text>
+
+  <!-- Worker -->
+  <rect x="1406" y="184" width="450" height="238" class="card"/>
+  <circle cx="1438" cy="216" r="15" fill="#f0ebfb"/>
+  <path d="M1432 209h12v4h-12z M1432 216h12v4h-12z M1432 223h12v4h-12z M1434 211h2 M1434 218h2 M1434 225h2" fill="none" stroke="#7855a8" stroke-width="1.5" stroke-linecap="round"/>
+  <text x="1462" y="222" class="cardTitle">Backend worker</text>
+  <text x="1430" y="258" class="body">Four logical consumer groups run in one worker</text>
+  <text x="1430" y="281" class="body">Each lane can retry independently</text>
+  <text x="1430" y="304" class="body">Persistence completes before dependent work</text>
+  <rect x="1430" y="330" width="393" height="38" rx="10" fill="#f5f1fb"/>
+  <text x="1445" y="354" class="small" font-weight="700" fill="#694a95">One event envelope → four processing lanes</text>
+  <text x="1430" y="397" class="tiny">Policy commit is required before sensor anchoring.</text>
+
+  <!-- Ingestion connectors -->
+  <path d="M370 303H406" class="blueLine"/>
+  <path d="M726 303H762" class="blueLine"/>
+  <path d="M1040 303H1076" class="blueLine"/>
+  <path d="M1362 303H1398" class="blueLine"/>
+  <text x="372" y="288" class="tiny">telemetry</text>
+  <text x="728" y="288" class="tiny">authenticated</text>
+  <text x="1042" y="288" class="tiny">publish</text>
+  <text x="1363" y="288" class="tiny">consume</text>
+
+  <text x="66" y="472" class="step">02  PROCESSING — FOUR INDEPENDENT LANES</text>
+  <text x="470" y="472" class="small">The policy evaluator controls safety holds; AI results remain advisory.</text>
+  <path d="M1631 422V492H294 M294 492H1795" fill="none" stroke="#9bb0c2" stroke-width="1.7" stroke-linejoin="round"/>
+  <path d="M294 492V518" fill="none" stroke="#9bb0c2" stroke-width="1.7" marker-end="url(#arrow)"/>
+  <path d="M816 492V518" fill="none" stroke="#9bb0c2" stroke-width="1.7" marker-end="url(#arrow)"/>
+  <path d="M1338 492V518" fill="none" stroke="#9bb0c2" stroke-width="1.7" marker-end="url(#arrow)"/>
+  <path d="M1795 492V518" fill="none" stroke="#9bb0c2" stroke-width="1.7" marker-end="url(#arrow)"/>
+
+  <!-- Processing cards -->
+  <rect x="64" y="530" width="460" height="270" class="card"/>
+  <rect x="64" y="530" width="460" height="7" rx="4" fill="#2878b9"/>
+  <circle cx="100" cy="575" r="21" fill="#e7f2fc"/>
+  <ellipse cx="100" cy="568" rx="9" ry="4" fill="none" stroke="#2878b9" stroke-width="1.8"/>
+  <path d="M91 568v12c0 5 18 5 18 0v-12 M91 574c0 5 18 5 18 0" fill="none" stroke="#2878b9" stroke-width="1.8"/>
+  <text x="137" y="570" class="eyebrow">CONSUMER GROUP 1</text>
+  <text x="137" y="594" class="cardTitle">Persistence</text>
+  <text x="88" y="632" class="body">Idempotently save each accepted reading.</text>
+  <text x="88" y="658" class="body">Update the dashboard projection and time-series data.</text>
+  <text x="88" y="684" class="body">Record location and event / correlation identity.</text>
+  <rect x="88" y="724" width="412" height="46" rx="11" fill="#edf5fc"/>
+  <text x="104" y="744" class="small" font-weight="700" fill="#286d9f">Completion receipt → downstream lanes proceed</text>
+  <text x="104" y="760" class="tiny">MongoDB replica set · time-series retention</text>
+
+  <rect x="548" y="530" width="460" height="270" class="card"/>
+  <rect x="548" y="530" width="460" height="7" rx="4" fill="#d48437"/>
+  <circle cx="584" cy="575" r="21" fill="#fcf1e5"/>
+  <path d="M575 576l6 6 12-14 M580 566h10" fill="none" stroke="#c1742d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="621" y="570" class="eyebrow">CONSUMER GROUP 2</text>
+  <text x="621" y="594" class="cardTitle">Approved policy evaluation</text>
+  <text x="572" y="632" class="body">Evaluate the batch's approved policy and excursion clock.</text>
+  <text x="572" y="658" class="body">Create alerts, quality holds and append-only audit events.</text>
+  <text x="572" y="684" class="body">Queue role-scoped notifications transactionally.</text>
+  <rect x="572" y="724" width="412" height="46" rx="11" fill="#fff4e8"/>
+  <text x="588" y="744" class="small" font-weight="700" fill="#a25e20">Authoritative application safety workflow</text>
+  <text x="588" y="760" class="tiny">Brief excursion → review · sustained → quarantine</text>
+
+  <rect x="1032" y="530" width="460" height="270" class="card"/>
+  <rect x="1032" y="530" width="460" height="7" rx="4" fill="#7955aa"/>
+  <circle cx="1068" cy="575" r="21" fill="#f1ebf9"/>
+  <path d="M1058 582l5-9 5 5 5-12 M1058 585h21" fill="none" stroke="#7955aa" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="1105" y="570" class="eyebrow">CONSUMER GROUP 3</text>
+  <text x="1105" y="594" class="cardTitle">AI advisory · FastAPI</text>
+  <text x="1056" y="632" class="body">Use recent temperature history for anomaly / trend context.</text>
+  <text x="1056" y="658" class="body">Save a score and explanation beside the reading.</text>
+  <text x="1056" y="684" class="body">GPS plausibility remains a separate physical rule.</text>
+  <rect x="1056" y="724" width="412" height="46" rx="11" fill="#f4effa"/>
+  <text x="1072" y="744" class="small" font-weight="700" fill="#68478f">Advisory only · cannot set a safety hold</text>
+  <text x="1072" y="760" class="tiny">Unavailable AI does not stop policy evaluation</text>
+
+  <rect x="1516" y="530" width="340" height="270" class="card"/>
+  <rect x="1516" y="530" width="340" height="7" rx="4" fill="#318066"/>
+  <circle cx="1552" cy="575" r="21" fill="#e8f5ef"/>
+  <path d="M1552 562l10 5v8c0 7-5 11-10 13-5-2-10-6-10-13v-8z M1547 575l4 4 7-8" fill="none" stroke="#318066" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="1589" y="570" class="eyebrow">CONSUMER GROUP 4</text>
+  <text x="1589" y="594" class="cardTitle">Merkle anchoring</text>
+  <text x="1540" y="632" class="body">Hash each batch-linked sensor reading.</text>
+  <text x="1540" y="658" class="body">Group leaves into time-window roots.</text>
+  <text x="1540" y="684" class="body">Wait for persistence + policy commit.</text>
+  <rect x="1540" y="724" width="292" height="46" rx="11" fill="#edf7f2"/>
+  <text x="1556" y="744" class="small" font-weight="700" fill="#286c55">Proof retained in MongoDB</text>
+  <text x="1556" y="760" class="tiny">Local chain confirmation is asynchronous</text>
+
+  <text x="66" y="846" class="step">03  RECORDS &amp; USER OUTPUTS</text>
+  <!-- Output stores -->
+  <rect x="64" y="870" width="560" height="190" class="card"/>
+  <circle cx="98" cy="911" r="18" fill="#e7f2fc"/>
+  <path d="M89 906h18v13H89z M92 903h12v3H92 M93 911h10 M93 915h7" fill="none" stroke="#2878b9" stroke-width="1.5" stroke-linecap="round"/>
+  <text x="128" y="908" class="cardTitle">MongoDB · application source</text>
+  <text x="88" y="950" class="body">Readings · policies · alerts · audit · inventory</text>
+  <text x="88" y="974" class="body">Orders · forecasts · locations · Merkle proofs · AI results</text>
+  <text x="88" y="1008" class="small">Primary store for queries and role-scoped views.</text>
+  <rect x="88" y="1030" width="512" height="20" rx="9" fill="#edf5fc"/>
+  <text x="102" y="1045" class="tiny" fill="#286d9f">Simulator and manual readings share the same records.</text>
+
+  <rect x="680" y="870" width="560" height="190" class="card"/>
+  <circle cx="714" cy="911" r="18" fill="#fff1e6"/>
+  <path d="M706 903h16v15h-16z M709 907h10 M709 911h10 M709 915h7" fill="none" stroke="#cc7837" stroke-width="1.6" stroke-linecap="round"/>
+  <text x="744" y="908" class="cardTitle">Notification outbox</text>
+  <text x="704" y="950" class="body">Durable in-app alerts for authorized roles</text>
+  <text x="704" y="974" class="body">Optional email delivery through retry worker</text>
+  <text x="704" y="1008" class="small">Local demo uses Ethereal email capture.</text>
+  <rect x="704" y="1030" width="512" height="20" rx="9" fill="#fff4e8"/>
+  <text x="718" y="1045" class="tiny" fill="#a25e20">Capture previews are test mail, not real delivery.</text>
+
+  <rect x="1296" y="870" width="560" height="190" class="card"/>
+  <circle cx="1330" cy="911" r="18" fill="#eaf6f0"/>
+  <path d="M1321 911l9-6 9 6-9 6z M1321 911v9l9 5 9-5v-9 M1330 917v8" fill="none" stroke="#318066" stroke-width="1.6" stroke-linejoin="round"/>
+  <text x="1360" y="908" class="cardTitle">Local Hardhat chain</text>
+  <text x="1320" y="950" class="body">Stores Merkle root, batch and window metadata</text>
+  <text x="1320" y="974" class="body">QR check compares confirmed root + MongoDB proof</text>
+  <text x="1320" y="1008" class="small">Chain ID 31337 · local development chain</text>
+  <rect x="1320" y="1030" width="512" height="20" rx="9" fill="#edf7f2"/>
+  <text x="1334" y="1045" class="tiny" fill="#286c55">Restarting the node loses its chain history.</text>
+
+  <!-- Worker outputs to stores; dependency order is documented in the lane cards above. -->
+  <path d="M294 800V862" class="blueLine"/>
+  <path d="M778 800V844H960V862" fill="none" stroke="#d48437" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="881" y="839" class="tiny" fill="#a25e20">alerts / outbox</text>
+  <path d="M1262 800V826H344V862" fill="none" stroke="#7955aa" stroke-width="1.8" stroke-dasharray="5 5" marker-end="url(#arrow)"/>
+  <text x="800" y="822" class="tiny" fill="#68478f">advisory saved with reading</text>
+  <path d="M1686 800V862" fill="none" stroke="#318066" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Authorized dashboards read the store and notifications; QR combines Mongo proof with chain root. -->
+  <path d="M344 1060V1075 M960 1060V1075 M1576 1060V1075 M344 1075H1576 M960 1075V1088" fill="none" stroke="#7e94a8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+  <rect x="64" y="1096" width="1792" height="106" rx="16" fill="#fff" stroke="#d9e3ed" stroke-width="1.2" filter="url(#shadow)"/>
+  <circle cx="102" cy="1149" r="22" fill="#edf0fb"/>
+  <path d="M90 1143h24v15H90z M97 1162h10 M102 1158v4 M96 1147h13 M96 1152h6 M106 1152h3" fill="none" stroke="#586cb0" stroke-width="1.6" stroke-linecap="round"/>
+  <text x="140" y="1142" class="cardTitle">Role-based dashboards + QR verification</text>
+  <text x="140" y="1168" class="body">Admin · Manufacturer · Distributor · Healthcare   |   Alerts, shipment views, analytics and reports   |   QR proof status: yes · pending · no / mismatch</text>
+  <text x="140" y="1188" class="tiny">Role-scoped REST / WebSocket reads; sensor verification compares the saved Mongo proof with the confirmed local chain root.</text>
+
+  <!-- Separate planning workflow -->
+  <rect x="64" y="1230" width="1792" height="188" rx="18" fill="#fff" stroke="#d9e3ed" stroke-width="1.2" filter="url(#shadow)"/>
+  <text x="88" y="1262" class="step">04  SUPPLY PLANNING — A SEPARATE OPERATIONAL DATA FLOW</text>
+  <text x="88" y="1284" class="small">Order history and inventory feed analysis; allocation remains a reviewed proposal.</text>
+  <rect x="88" y="1300" width="300" height="80" rx="13" fill="#f3f7fb" stroke="#dce6ef"/>
+  <text x="108" y="1332" class="cardTitle">Orders + inventory</text>
+  <text x="108" y="1356" class="body">Operational history in MongoDB</text>
+  <path d="M388 1340H435" class="blueLine"/>
+  <rect x="445" y="1300" width="338" height="80" rx="13" fill="#f5f0fa" stroke="#e5d9f0"/>
+  <text x="465" y="1332" class="cardTitle">Regional forecasting</text>
+  <text x="465" y="1356" class="body">Synthetic orders → forecast + metrics</text>
+  <path d="M783 1340H830" class="blueLine"/>
+  <rect x="840" y="1300" width="338" height="80" rx="13" fill="#eef5fb" stroke="#d5e5f2"/>
+  <text x="860" y="1332" class="cardTitle">Constrained allocation preview</text>
+  <text x="860" y="1356" class="body">Inventory, capacity and shelf-life rules</text>
+  <path d="M1178 1340H1225" class="blueLine"/>
+  <rect x="1235" y="1300" width="294" height="80" rx="13" fill="#fff5e9" stroke="#f1dfca"/>
+  <text x="1255" y="1332" class="cardTitle">Human review</text>
+  <text x="1255" y="1356" class="body">Approval required before changes</text>
+  <path d="M1529 1340H1576" class="blueLine"/>
+  <rect x="1586" y="1300" width="244" height="80" rx="13" fill="#edf6f1" stroke="#d1e7da"/>
+  <text x="1606" y="1332" class="cardTitle">Plan + dashboards</text>
+  <text x="1606" y="1356" class="body">No automatic dispatch</text>
+  <text x="88" y="1402" class="tiny">Forecast inputs are synthetic; measured fit is not external demand validation. Seeded stock can remain ineligible until release gates pass.</text>
+
+  <text x="64" y="1444" class="tiny">Prototype boundary: private local services, simulated telemetry and a volatile local chain. AI is advisory; approved batch policy governs alert holds. No physical sensors or clinical validation.</text>
+</svg>

@@ -2,6 +2,10 @@
 
 **Scope note:** This document describes the code paths verified in this repository today. The earlier aspirational design is preserved separately in [FUTURE_ARCHITECTURE.md](FUTURE_ARCHITECTURE.md); it is not a description of the implemented system. See [README.md](README.md) for setup and test commands.
 
+![Current implemented vaccine supply chain architecture](docs/current-architecture.png)
+
+Editable vector source: [current-architecture.svg](docs/current-architecture.svg). For the event-by-event path, see the [data flow diagram](docs/data-flow-diagram.png) ([SVG source](docs/data-flow-diagram.svg)).
+
 ## How to read this document
 
 Each implementation statement includes repository-relative source paths and line numbers. “Not implemented” means no corresponding active path was found in the inspected application entry points and registered routes; it does not rule out code that an operator could write outside this repository. The source references describe code, not the current contents of a running database or environment.

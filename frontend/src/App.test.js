@@ -3,5 +3,6 @@ import App from './App';
 
 test('renders the vaccine supply chain login screen', () => {
   render(<App />);
-  expect(screen.getByText(/Blockchain-Enabled Vaccine Supply Chain Management System/i)).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'SmartVax' })).toBeInTheDocument();
+  expect(screen.getByText(/Intelligent Vaccine Cold-Chain Monitoring & Supply Management/i)).toBeInTheDocument();
 });

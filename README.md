@@ -43,6 +43,8 @@ node .\scripts\run-demo.js
 
 The launcher creates a private, ignored `.env` with random local-only secrets if one does not exist, builds and waits for the Compose services, then seeds synthetic demo accounts/data. It never overwrites an existing `.env`. Dashboards: `http://localhost:3000`; field operator panel: `http://localhost:5173`. Seeded roles share the `DEMO_SEED_PASSWORD` value in `.env`. To prove the alert-to-chain path, run `node .\scripts\acceptance.js`; to create the evaluation report, run `node .\scripts\evaluate.js`.
 
+For transferring this project to another Windows computer, see the [portable setup and presentation guide](docs/PORTABLE_SETUP_AND_PRESENTATION.md). It covers ZIP contents, software installation, first-run commands, demo logins, all five role features, presentation flow, and troubleshooting.
+
 To stop services without deleting their data, use `docker compose down`. Do not use `docker compose down -v` on a working demo: the local Hardhat node is in-memory and restarting it loses chain history.
 
 ## Viva demo, step by step
